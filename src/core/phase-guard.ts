@@ -1,5 +1,6 @@
 import { Phase, ChangeState } from './types.js';
 import { DirtyWorktreeChecker } from './dirty-worktree.js';
+import { HandoffManager } from './handoff-manager.js';
 
 export type ReviewType = 'requirement' | 'technical' | 'code';
 
@@ -54,14 +55,17 @@ function fail(
 const REVIEW_PASSED = 'passed';
 
 export class PhaseGuardImpl implements PhaseGuard {
-  constructor(private dirtyWorktree?: DirtyWorktreeChecker) {}
+  constructor(
+    private dirtyWorktree?: DirtyWorktreeChecker,
+    private handoffManager?: HandoffManager,
+  ) {}
 
   async checkEntry(phase: Phase, state: ChangeState): Promise<GuardResult> {
     switch (phase) {
       case 'design':
         return this.checkDesignEntry(state);
       case 'build':
-        return this.checkBuildEntry(state);
+        return await this.checkBuildEntry(state);
       case 'verify':
         return this.checkVerifyEntry(state);
       case 'archive':
@@ -95,7 +99,7 @@ export class PhaseGuardImpl implements PhaseGuard {
     return buildResult('design', 'entry', failures);
   }
 
-  private checkBuildEntry(state: ChangeState): GuardResult {
+  private async checkBuildEntry(state: ChangeState): Promise<GuardResult> {
     const failures: GuardFailure[] = [];
     if (state.phase !== 'build') {
       failures.push(fail('phase_is_build', 'build', state.phase, 'error', '当前阶段不是 build'));
@@ -128,21 +132,25 @@ export class PhaseGuardImpl implements PhaseGuard {
       );
     }
     if (state.phases.design.artifacts.handoff) {
-      const hashValid = this.validateHandoffHash(state);
-      if (!hashValid) {
+      const mismatchedFiles = await this.validateHandoffHash(state);
+      if (mismatchedFiles.length > 0) {
         failures.push(
           fail(
             'handoff_hash_valid',
             'hash 匹配',
             'hash 不匹配',
-            'warning',
-            'Handoff 已变更，建议重新生成',
+            'error',
+            `Handoff 文件哈希不匹配: ${mismatchedFiles.join(', ')}`,
           ),
         );
       }
+      const intentFailure = await this.checkIntentAlignment(state);
+      if (intentFailure) {
+        failures.push(intentFailure);
+      }
     }
     const dirtyResult = this.dirtyWorktree
-      ? { dirty: false, changes: [] }
+      ? await this.dirtyWorktree.check(state.change)
       : { dirty: false, changes: [] };
     if (dirtyResult.dirty) {
       failures.push(
@@ -217,8 +225,51 @@ export class PhaseGuardImpl implements PhaseGuard {
     return buildResult('archive', 'entry', failures);
   }
 
-  private validateHandoffHash(_state: ChangeState): boolean {
-    return true;
+  private async validateHandoffHash(state: ChangeState): Promise<string[]> {
+    if (!this.handoffManager) {
+      return [];
+    }
+    return this.handoffManager.getMismatchedFiles(state.change);
+  }
+
+  private async checkIntentAlignment(state: ChangeState): Promise<GuardFailure | null> {
+    if (!this.handoffManager) {
+      return null;
+    }
+    const handoff = await this.handoffManager.getHandoffPackage(state.change);
+    if (!handoff || !handoff.context.intent) {
+      return null;
+    }
+    const intent = handoff.context.intent;
+    const designContent = await this.handoffManager.readChangeFile(state.change, 'design.md');
+    if (!designContent) {
+      return null;
+    }
+    if (this.intentAligned(designContent, intent)) {
+      return null;
+    }
+    return fail(
+      'intent_alignment',
+      'design 对齐 intent',
+      'design 可能偏离意图',
+      'warning',
+      `设计文档可能偏离原始意图：${intent}`,
+    );
+  }
+
+  private intentAligned(designContent: string, intent: string): boolean {
+    const keywords = this.extractKeywords(intent);
+    if (keywords.length === 0) {
+      return true;
+    }
+    return keywords.some((kw) => designContent.includes(kw));
+  }
+
+  private extractKeywords(intent: string): string[] {
+    const words = intent
+      .split(/[\s,，。.;；:：!！?？()（）\[\]]+/)
+      .filter((w) => w.length >= 2);
+    return words.slice(0, 5);
   }
 
   async checkExit(phase: Phase, state: ChangeState): Promise<GuardResult> {

@@ -28,11 +28,36 @@ $ARGUMENTS
    - MVP 功能范围
    - UI 风格偏好
    - 代码仓地址（可选，用于存量功能分析）
+
+**⚠️ Decision Point DP-0: 需求确认**
+- 暂停工作流，向用户展示当前产出件
+- 等待用户确认（confirmed）后再进入下一步
+- 用户拒绝时返回当前步骤修改，不进入下一阶段
+
 2. **存量分析** — 若用户提供代码仓地址，分析现有功能结构和代码质量
 3. **生成 Change 名称** — 从输入推导 kebab-case change 名称，确保 `openspec/changes/<name>/` 存在
 4. **生成 proposal.md** — 使用 `.driv/templates/proposals/default.md` 模板，包含 8 条验收标准
+   - **必须包含 `## Intent` 章节** — 一句话锁定本次变更核心意图（如：'修复用户登录超时 bug，不改变现有 API 签名'）。该意图将在 Design→Build 边界作为意图锁（Intent Lock）用于 design.md 对齐校验。
+
+**⚠️ Decision Point DP-1: 提案确认**
+- 暂停工作流，向用户展示当前产出件
+- 等待用户确认（confirmed）后再进入下一步
+- 用户拒绝时返回当前步骤修改，不进入下一阶段
+
 5. **生成 tasks.md** — 任务清单（跨 5 阶段，约 22 项）
+
+**⚠️ Decision Point DP-4: 任务确认**
+- 暂停工作流，向用户展示当前产出件
+- 等待用户确认（confirmed）后再进入下一步
+- 用户拒绝时返回当前步骤修改，不进入下一阶段
+
 6. **生成 specs/<capability>/spec.md** — 能力规格（行为场景描述），由 AI 直接基于 OpenSpec 模板生成，不经过 design-to-spec-converter 转换
+
+**⚠️ Decision Point DP-2: 规格确认**
+- 暂停工作流，向用户展示当前产出件
+- 等待用户确认（confirmed）后再进入下一步
+- 用户拒绝时返回当前步骤修改，不进入下一阶段
+
 7. **生成 reviews/requirement-review.md** — 需求评审（AI 预检）
 8. **创建 .openspec.yaml** — 记录 schema、change、phase、status、created 和 proposal artifact
 9. **创建 .driv.yaml** — 初始化状态文件，设置 clarify 阶段为 in-progress

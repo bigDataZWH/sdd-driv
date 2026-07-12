@@ -4,7 +4,7 @@ import { FileSystem } from '../utils/file-system.js';
 import { StateMachine } from './state-machine.js';
 import { CleanCodeChecker } from './clean-code-checker.js';
 import { ScriptExec } from '../utils/script-exec.js';
-import { DebugGate } from './debug-gate.js';
+import { DebugGate, DebugGateResult } from './debug-gate.js';
 
 export type VerifyScale = 'light' | 'full';
 
@@ -16,6 +16,8 @@ export interface VerifyResult {
   branchHandled: boolean;
   reportPath: string;
   passed: boolean;
+  debugGateEnforced?: boolean;
+  investigateGuidance?: string;
 }
 
 async function walkDir(dir: string): Promise<string[]> {
@@ -194,7 +196,7 @@ export class VerifyService {
     const branchHandled = false;
     const passed = buildPassed && testsPassed && cleanCodePassed;
 
-    const reportPath = await this.generateReport(changeName, {
+    const result: VerifyResult = {
       scale,
       buildPassed,
       testsPassed,
@@ -202,17 +204,18 @@ export class VerifyService {
       branchHandled,
       reportPath: '',
       passed,
-    });
-
-    const result: VerifyResult = {
-      scale,
-      buildPassed,
-      testsPassed,
-      cleanCodePassed,
-      branchHandled,
-      reportPath,
-      passed,
     };
+
+    let debugGateResult: DebugGateResult | undefined;
+    if (!passed) {
+      debugGateResult = this.debugGate.enforce('verify', passed);
+      // 将 debugGate 信息写入验证结果
+      result.debugGateEnforced = debugGateResult.enforced;
+      result.investigateGuidance = debugGateResult.investigateGuidance;
+    }
+
+    const reportPath = await this.generateReport(changeName, result);
+    result.reportPath = reportPath;
 
     await this.stateMachine.setField(changeName, 'verifyResult', passed ? 'pass' : 'fail');
     await this.stateMachine.setField(
@@ -220,10 +223,6 @@ export class VerifyService {
       'phases.verify.status',
       passed ? 'completed' : 'failed',
     );
-
-    if (!passed) {
-      this.debugGate.enforce('verify', passed);
-    }
 
     return result;
   }
@@ -252,6 +251,14 @@ export class VerifyService {
     lines.push('## 结论');
     lines.push('');
     lines.push(result.passed ? '✅ **验证通过**' : '❌ **验证未通过**');
+
+    if (result.debugGateEnforced && result.investigateGuidance) {
+      lines.push('');
+      lines.push('## DebugGate 侧路径（investigate 指引）');
+      lines.push('');
+      lines.push(`- **enforced**: true`);
+      lines.push(`- **指引**: ${result.investigateGuidance}`);
+    }
 
     await this.fs.writeFile(reportPath, lines.join('\n'));
     return reportPath;

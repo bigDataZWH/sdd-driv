@@ -27,6 +27,12 @@ $ARGUMENTS
 **Steps**:
 
 1. **生成 handoff-context.json** — 调用 handoff 模块的 `generate()`，传入 compression 策略（默认 `concise`），产出结构化的上下文包，包含 proposal/design/tasks/reviews 摘要
+
+**⚠️ Decision Point DP-5: 契约确认**
+- 暂停工作流，向用户展示当前产出件
+- 等待用户确认（confirmed）后再进入下一步
+- 用户拒绝时返回当前步骤修改，不进入下一阶段
+
 2. **调用 brainstorming** — 加载 brainstorming skill 作为流程约束，对设计关键决策进行发散-收敛，记录决策理由：
    - 架构选择（FSM/状态机设计）
    - 接口设计
@@ -35,6 +41,12 @@ $ARGUMENTS
    - 技术选型确认
    - 性能优化策略
 3. **生成 design.md** — 将 brainstorming 输出和 handoff 摘要写入 `openspec/changes/<name>/design.md`，确保包含架构、数据流、组件树等核心设计要素
+
+**⚠️ Decision Point DP-3: 设计确认**
+- 暂停工作流，向用户展示当前产出件
+- 等待用户确认（confirmed）后再进入下一步
+- 用户拒绝时返回当前步骤修改，不进入下一阶段
+
 4. **用户确认 design.md** — 展示生成的设计文档，让用户确认是否满意，如有修改需求进行迭代
 5. **更新 tasks.md** — 根据设计决策拆分具体实现任务，勾选 D1-D5 设计阶段任务
 6. **用户确认 tasks.md** — 展示更新后的任务清单，让用户确认是否完整

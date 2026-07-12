@@ -53,6 +53,8 @@ describe('ContextCompression', () => {
       constraints: ['c1'],
       tasks: ['t1', 't2', 't3'],
       reviews: ['r1'],
+      intent: '修复 bug',
+      acceptanceCriteria: ['ac1'],
     };
     const result = compressor.compress(ctx, 'off');
     expect(result).toEqual(ctx);
@@ -68,6 +70,8 @@ describe('ContextCompression', () => {
       constraints: [...longArray],
       tasks: [...longArray],
       reviews: [...longArray],
+      intent: 'x'.repeat(300),
+      acceptanceCriteria: [...longArray],
     };
     const result = compressor.compress(ctx, 'beta');
     expect(result.decisions.length).toBe(10);
@@ -75,6 +79,8 @@ describe('ContextCompression', () => {
     expect(result.tasks.length).toBe(10);
     expect(result.reviews.length).toBe(10);
     expect(result.summary.length).toBeLessThanOrEqual(400);
+    expect(result.intent.length).toBeLessThanOrEqual(200);
+    expect(result.acceptanceCriteria.length).toBe(10);
   });
 
   it('full 策略将长数组截断到 5 项，摘要截断到 200 字符', async () => {
@@ -87,6 +93,8 @@ describe('ContextCompression', () => {
       constraints: [...longArray],
       tasks: [...longArray],
       reviews: [...longArray],
+      intent: 'x'.repeat(200),
+      acceptanceCriteria: [...longArray],
     };
     const result = compressor.compress(ctx, 'full');
     expect(result.decisions.length).toBe(5);
@@ -94,6 +102,8 @@ describe('ContextCompression', () => {
     expect(result.tasks.length).toBe(5);
     expect(result.reviews.length).toBe(5);
     expect(result.summary.length).toBeLessThanOrEqual(200);
+    expect(result.intent.length).toBeLessThanOrEqual(100);
+    expect(result.acceptanceCriteria.length).toBe(5);
   });
 });
 
@@ -258,5 +268,105 @@ describe('HandoffManager', () => {
 
     const valid = await manager.validate(changeName, 'design');
     expect(valid).toBe(false);
+  });
+});
+
+describe('Intent 抽取和验收标准', () => {
+  async function setupCustomChange(
+    root: string,
+    changeName: string,
+    files: Record<string, string>,
+  ): Promise<void> {
+    const changeDir = path.join(root, 'openspec', 'changes', changeName);
+    await fs.promises.mkdir(changeDir, { recursive: true });
+    for (const [fileName, content] of Object.entries(files)) {
+      const filePath = path.join(changeDir, fileName);
+      await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
+      await fs.promises.writeFile(filePath, content);
+    }
+  }
+
+  async function createManager(root: string) {
+    const { HandoffManager } = await import('../src/core/handoff-manager.js');
+    const { FileSystem } = await import('../src/utils/file-system.js');
+    const { PathResolver } = await import('../src/core/path-resolver.js');
+    const { YamlParser } = await import('../src/utils/yaml-parser.js');
+    const fs_ = new FileSystem(root);
+    const resolver = new PathResolver(root);
+    const parser = new YamlParser(fs_);
+    return new HandoffManager(fs_, resolver, parser);
+  }
+
+  it('proposal.md 包含 ## Intent 章节时，handoff.context.intent 被正确填充', async () => {
+    await setupCustomChange(TMP_DIR, 'intent-en', {
+      'proposal.md':
+        '# 提案\n\n## Intent\n修复 login timeout 问题\n\n## 其他\n其他内容',
+      'design.md': '# 设计',
+      'tasks.md': '# 任务',
+    });
+    const manager = await createManager(TMP_DIR);
+    const handoff = await manager.generate('intent-en', 'design', 'off');
+    expect(handoff.context.intent).toBe('修复 login timeout 问题');
+  });
+
+  it('proposal.md 包含 ## 目标 章节时，handoff.context.intent 被正确填充', async () => {
+    await setupCustomChange(TMP_DIR, 'intent-zh', {
+      'proposal.md':
+        '# 提案\n\n实现用户登录功能\n\n## 目标\n提供安全的用户认证\n\n## 其他\n其他内容',
+      'design.md': '# 设计',
+      'tasks.md': '# 任务',
+    });
+    const manager = await createManager(TMP_DIR);
+    const handoff = await manager.generate('intent-zh', 'design', 'off');
+    expect(handoff.context.intent).toBe('提供安全的用户认证');
+  });
+
+  it('proposal.md 不包含 Intent 章节时，handoff.context.intent 为空字符串', async () => {
+    await setupCustomChange(TMP_DIR, 'intent-none', {
+      'proposal.md': '# 提案\n\n实现用户登录功能\n\n## 背景\n背景内容',
+      'design.md': '# 设计',
+      'tasks.md': '# 任务',
+    });
+    const manager = await createManager(TMP_DIR);
+    const handoff = await manager.generate('intent-none', 'design', 'off');
+    expect(handoff.context.intent).toBe('');
+  });
+
+  it('tasks.md 包含验收标准时，handoff.context.acceptanceCriteria 被填充', async () => {
+    await setupCustomChange(TMP_DIR, 'ac-present', {
+      'proposal.md': '# 提案',
+      'design.md': '# 设计',
+      'tasks.md':
+        '# 任务\n\n- [ ] 实现登录 API\n\n## 验收标准\n\n- 登录成功返回 token\n- 登录失败返回 401',
+    });
+    const manager = await createManager(TMP_DIR);
+    const handoff = await manager.generate('ac-present', 'design', 'off');
+    expect(handoff.context.acceptanceCriteria.length).toBeGreaterThanOrEqual(2);
+    expect(handoff.context.acceptanceCriteria).toContain('登录成功返回 token');
+    expect(handoff.context.acceptanceCriteria).toContain('登录失败返回 401');
+  });
+
+  it('tasks.md 不包含验收标准时，handoff.context.acceptanceCriteria 为空数组', async () => {
+    await setupCustomChange(TMP_DIR, 'ac-absent', {
+      'proposal.md': '# 提案',
+      'design.md': '# 设计',
+      'tasks.md': '# 任务\n\n- [ ] 实现登录 API',
+    });
+    const manager = await createManager(TMP_DIR);
+    const handoff = await manager.generate('ac-absent', 'design', 'off');
+    expect(handoff.context.acceptanceCriteria).toEqual([]);
+  });
+
+  it('tasks.md 包含 验收标准： 行形式时，acceptanceCriteria 被填充', async () => {
+    await setupCustomChange(TMP_DIR, 'ac-inline', {
+      'proposal.md': '# 提案',
+      'design.md': '# 设计',
+      'tasks.md':
+        '# 任务\n\n- [ ] 实现登录 API\n  验收标准：返回 JWT token\n- [ ] 添加 JWT 验证\n  Acceptance: 401 on invalid token',
+    });
+    const manager = await createManager(TMP_DIR);
+    const handoff = await manager.generate('ac-inline', 'design', 'off');
+    expect(handoff.context.acceptanceCriteria).toContain('返回 JWT token');
+    expect(handoff.context.acceptanceCriteria).toContain('401 on invalid token');
   });
 });

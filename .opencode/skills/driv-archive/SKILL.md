@@ -12,6 +12,12 @@ description: 启动 Archive 阶段 - 验证前置条件、归档工件、合并 
 ## Steps
 
 1. **验证前置条件** — 检查：verify 已完成且通过（phases.verify.status == completed、verifyResult == passed）、change 存在、未归档、`reports/verification-report.md` 存在
+
+**⚠️ Decision Point DP-7: 收尾确认**
+- 暂停工作流，向用户展示当前产出件
+- 等待用户确认（confirmed）后再进入下一步
+- 用户拒绝时返回当前步骤修改，不进入下一阶段
+
 2. **创建归档目录** — 生成 `openspec/archive/YYYY-MM-DD-<name>/` 目录结构
 3. **复制工件** — 复制 proposal.md、design.md、tasks.md、specs/、reviews/、reports/ 到归档目录
 4. **合并 Delta Spec** — 对主 spec 执行 append/update/supersede 合并策略，写入 `openspec/archive/YYYY-MM-DD-<name>/delta-spec.md`

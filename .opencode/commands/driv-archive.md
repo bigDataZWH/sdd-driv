@@ -20,6 +20,12 @@ $ARGUMENTS
 ## Steps
 
 1. **验证前置条件** — 检查 verify 完成/change 存在/未归档/报告存在
+
+**⚠️ Decision Point DP-7: 收尾确认**
+- 暂停工作流，向用户展示当前产出件
+- 等待用户确认（confirmed）后再进入下一步
+- 用户拒绝时返回当前步骤修改，不进入下一阶段
+
 2. **创建归档目录** — `openspec/archive/YYYY-MM-DD-<name>/`
 3. **复制工件** — proposal/design/tasks/specs/reviews/reports/handoff
 4. **合并 Delta Spec** — 写入 `delta-spec.md`

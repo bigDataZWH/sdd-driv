@@ -27,6 +27,22 @@ $ARGUMENTS
 6. **生成验证报告** — 写入 `reports/verification-report.md`
 7. **更新状态** — 写入 `.driv.yaml.verifyResult` 和 `phases.verify`
 
+**⚠️ Decision Point DP-7: 收尾确认**
+- 暂停工作流，向用户展示当前产出件
+- 等待用户确认（confirmed）后再进入下一步
+- 用户拒绝时返回当前步骤修改，不进入下一阶段
+
+## Output验证失败处理（DebugGate 侧路径）
+
+- 当 verify 结果为 fail 时，DebugGate.enforce() 触发
+- 禁止猜测式修复（禁止直接修改代码后重试）
+- 必须进入 investigate 子流程：
+  1. 复现问题
+  2. 定位根因（使用 brainstorming/investigate 技能）
+  3. 修复根因
+  4. 重新验证
+- investigate 完成后方可重新触发 verify
+
 ## Output
 
 - **阻塞原因**：build 失败 / 测试失败 / Clean Code 分低 / 合并冲突

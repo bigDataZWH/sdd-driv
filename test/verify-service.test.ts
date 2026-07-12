@@ -311,6 +311,46 @@ describe('VerifyService', () => {
       expect(fs.existsSync(path.join(reportsDir, 'clean-code-report.md'))).toBe(true);
       expect(fs.existsSync(path.join(reportsDir, 'clean-code-issues.json'))).toBe(true);
     });
+
+    it('验证失败时 result.debugGateEnforced === true', async () => {
+      await setupFullVerifyChange('verify-debuggate-fail', true, false);
+
+      const result = await verifyService.verify('verify-debuggate-fail');
+
+      expect(result.passed).toBe(false);
+      expect(result.debugGateEnforced).toBe(true);
+    });
+
+    it('验证失败时 result.investigateGuidance 非空', async () => {
+      await setupFullVerifyChange('verify-debuggate-guidance', false, true);
+
+      const result = await verifyService.verify('verify-debuggate-guidance');
+
+      expect(result.passed).toBe(false);
+      expect(result.investigateGuidance).toBeTruthy();
+      expect(typeof result.investigateGuidance).toBe('string');
+      expect(result.investigateGuidance!.length).toBeGreaterThan(0);
+    });
+
+    it('验证通过时 result.debugGateEnforced 为 false 或 undefined', async () => {
+      await setupFullVerifyChange('verify-debuggate-pass', true, true);
+
+      const result = await verifyService.verify('verify-debuggate-pass');
+
+      expect(result.passed).toBe(true);
+      expect(result.debugGateEnforced === false || result.debugGateEnforced === undefined).toBe(true);
+    });
+
+    it('验证失败时报告中包含 investigate 指引', async () => {
+      await setupFullVerifyChange('verify-debuggate-report', true, false);
+
+      const result = await verifyService.verify('verify-debuggate-report');
+
+      expect(result.reportPath).toBeTruthy();
+      const content = fs.readFileSync(result.reportPath, 'utf-8');
+      expect(content).toContain('DebugGate');
+      expect(content).toContain('investigate');
+    });
   });
 
   describe('parseCommand', () => {
