@@ -21,6 +21,7 @@
     "dev": "tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/ test/",
     "format": "prettier --write src/ test/",
@@ -38,7 +39,8 @@
     "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.9.1",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.6"
+    "vitest": "^4.1.6",
+    "@vitest/coverage-v8": "^4.1.6"
   },
   "dependencies": {
     "@inquirer/prompts": "^8.5.2",

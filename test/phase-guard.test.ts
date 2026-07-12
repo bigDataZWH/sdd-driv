@@ -181,6 +181,94 @@ describe('PhaseGuard', () => {
       expect(result.passed).toBe(false);
       expect(result.failures.some((f) => f.check === 'build_mode_set')).toBe(true);
     });
+
+    it('Build exit 在 tddMode 为 tdd 时不报 tdd 相关失败', async () => {
+      const { PhaseGuardImpl } = await import('../src/core/phase-guard.js');
+      const { createDefaultState } = await import('../src/core/types.js');
+      const guard = new PhaseGuardImpl();
+      const state = createDefaultState('test');
+      state.buildMode = 'subagent-driven-development';
+      state.tddMode = 'tdd';
+      state.isolation = 'branch';
+      state.phases.build.artifacts.committed = 'true';
+      state.phases.build.artifacts.tests = 'passed';
+      state.phases.build.artifacts['clean-code'] = 'passed';
+      state.hwProcess.codeReview = 'passed';
+      state.phases.build.artifacts['plan-created'] = 'true';
+      state.superpowers.plan = 'openspec/changes/test/plan.md';
+
+      const result = await guard.checkExit('build', state);
+
+      expect(result.failures.some((f) => f.check === 'tdd_mode_set')).toBe(false);
+      expect(result.failures.some((f) => f.check === 'tdd_mode_warning')).toBe(false);
+    });
+
+    it('Build exit 在 tddMode 为 tdd-lite 时不报 tdd 相关失败', async () => {
+      const { PhaseGuardImpl } = await import('../src/core/phase-guard.js');
+      const { createDefaultState } = await import('../src/core/types.js');
+      const guard = new PhaseGuardImpl();
+      const state = createDefaultState('test');
+      state.buildMode = 'subagent-driven-development';
+      state.tddMode = 'tdd-lite';
+      state.isolation = 'branch';
+      state.phases.build.artifacts.committed = 'true';
+      state.phases.build.artifacts.tests = 'passed';
+      state.phases.build.artifacts['clean-code'] = 'passed';
+      state.hwProcess.codeReview = 'passed';
+      state.phases.build.artifacts['plan-created'] = 'true';
+      state.superpowers.plan = 'openspec/changes/test/plan.md';
+
+      const result = await guard.checkExit('build', state);
+
+      expect(result.failures.some((f) => f.check === 'tdd_mode_set')).toBe(false);
+      expect(result.failures.some((f) => f.check === 'tdd_mode_warning')).toBe(false);
+    });
+
+    it('Build exit 在 tddMode 为 no-tdd 时报 tdd_mode_warning 且不报 tdd_mode_set', async () => {
+      const { PhaseGuardImpl } = await import('../src/core/phase-guard.js');
+      const { createDefaultState } = await import('../src/core/types.js');
+      const guard = new PhaseGuardImpl();
+      const state = createDefaultState('test');
+      state.buildMode = 'subagent-driven-development';
+      state.tddMode = 'no-tdd';
+      state.isolation = 'branch';
+      state.phases.build.artifacts.committed = 'true';
+      state.phases.build.artifacts.tests = 'passed';
+      state.phases.build.artifacts['clean-code'] = 'passed';
+      state.hwProcess.codeReview = 'passed';
+      state.phases.build.artifacts['plan-created'] = 'true';
+      state.superpowers.plan = 'openspec/changes/test/plan.md';
+
+      const result = await guard.checkExit('build', state);
+
+      expect(result.failures.some((f) => f.check === 'tdd_mode_set')).toBe(false);
+      const warning = result.failures.find((f) => f.check === 'tdd_mode_warning');
+      expect(warning).toBeDefined();
+      expect(warning?.severity).toBe('warning');
+    });
+
+    it('Build exit 在 tddMode 未设置时报 tdd_mode_set error', async () => {
+      const { PhaseGuardImpl } = await import('../src/core/phase-guard.js');
+      const { createDefaultState } = await import('../src/core/types.js');
+      const guard = new PhaseGuardImpl();
+      const state = createDefaultState('test');
+      state.buildMode = 'subagent-driven-development';
+      state.tddMode = '';
+      state.isolation = 'branch';
+      state.phases.build.artifacts.committed = 'true';
+      state.phases.build.artifacts.tests = 'passed';
+      state.phases.build.artifacts['clean-code'] = 'passed';
+      state.hwProcess.codeReview = 'passed';
+      state.phases.build.artifacts['plan-created'] = 'true';
+      state.superpowers.plan = 'openspec/changes/test/plan.md';
+
+      const result = await guard.checkExit('build', state);
+
+      expect(result.passed).toBe(false);
+      const tddFailure = result.failures.find((f) => f.check === 'tdd_mode_set');
+      expect(tddFailure).toBeDefined();
+      expect(tddFailure?.severity).toBe('error');
+    });
   });
 
   describe('3.5 - Verify & Archive 阶段守卫', () => {

@@ -18,6 +18,15 @@ export interface VerifyResult {
   passed: boolean;
   debugGateEnforced?: boolean;
   investigateGuidance?: string;
+  coveragePassed?: boolean;
+  coverageSummary?: {
+    lines: number;
+    functions: number;
+    branches: number;
+    statements: number;
+  };
+  lintPassed?: boolean;
+  typeCheckPassed?: boolean;
 }
 
 async function walkDir(dir: string): Promise<string[]> {
@@ -134,6 +143,59 @@ export class VerifyService {
     return this.runCommand(testCmd);
   }
 
+  private async readCoverage(): Promise<{
+    passed: boolean;
+    summary?: VerifyResult['coverageSummary'];
+  }> {
+    try {
+      const coveragePath = path.join(this.root, 'coverage', 'coverage-summary.json');
+      const content = await fs.promises.readFile(coveragePath, 'utf-8');
+      const data = JSON.parse(content);
+      // coverage-summary.json 格式：{ total: { lines: { pct: 80 }, functions: { pct: 82 }, branches: { pct: 70 }, statements: { pct: 80 } } }
+      const total = data.total;
+      if (!total) return { passed: true };
+      const summary = {
+        lines: total.lines?.pct ?? 0,
+        functions: total.functions?.pct ?? 0,
+        branches: total.branches?.pct ?? 0,
+        statements: total.statements?.pct ?? 0,
+      };
+      const passed =
+        summary.lines >= 80 &&
+        summary.functions >= 80 &&
+        summary.branches >= 70 &&
+        summary.statements >= 80;
+      return { passed, summary };
+    } catch {
+      // coverage 文件不存在，向后兼容
+      return { passed: true };
+    }
+  }
+
+  async executeLint(): Promise<boolean> {
+    try {
+      const packageJsonPath = path.join(this.root, 'package.json');
+      const content = await fs.promises.readFile(packageJsonPath, 'utf-8');
+      const pkg = JSON.parse(content);
+      if (!pkg.scripts?.lint) {
+        return true; // 无 lint script，向后兼容
+      }
+      return this.runCommand('npm run lint');
+    } catch {
+      return true; // 读取失败，向后兼容
+    }
+  }
+
+  async executeTypeCheck(): Promise<boolean> {
+    try {
+      const tsconfigPath = path.join(this.root, 'tsconfig.json');
+      await fs.promises.access(tsconfigPath);
+      return this.runCommand('npx tsc --noEmit');
+    } catch {
+      return true; // 无 tsconfig.json，向后兼容
+    }
+  }
+
   private parseCommand(cmd: string): { command: string; args: string[] } {
     const parts: string[] = [];
     let current = '';
@@ -191,10 +253,23 @@ export class VerifyService {
       cleanCodePassed = true;
     }
 
+    // 覆盖率收集（新增）
+    const coverage = await this.readCoverage();
+
+    // lint + typecheck（新增）
+    const lintPassed = await this.executeLint();
+    const typeCheckPassed = await this.executeTypeCheck();
+
     await this.writeCleanCodeArtifacts(changeName, cleanCodePassed, cleanCodeIssues);
 
     const branchHandled = false;
-    const passed = buildPassed && testsPassed && cleanCodePassed;
+    const passed =
+      buildPassed &&
+      testsPassed &&
+      cleanCodePassed &&
+      coverage.passed &&
+      lintPassed &&
+      typeCheckPassed;
 
     const result: VerifyResult = {
       scale,
@@ -204,6 +279,10 @@ export class VerifyService {
       branchHandled,
       reportPath: '',
       passed,
+      coveragePassed: coverage.passed,
+      coverageSummary: coverage.summary,
+      lintPassed,
+      typeCheckPassed,
     };
 
     let debugGateResult: DebugGateResult | undefined;
@@ -246,6 +325,13 @@ export class VerifyService {
     lines.push(`| 构建 | ${result.buildPassed ? '✅ 通过' : '❌ 失败'} |`);
     lines.push(`| 测试 | ${result.testsPassed ? '✅ 通过' : '❌ 失败'} |`);
     lines.push(`| Clean Code | ${result.cleanCodePassed ? '✅ 通过' : '❌ 失败'} |`);
+    lines.push(
+      `| 测试覆盖率 | ${result.coveragePassed ? '✅ 通过' : '❌ 未达标'} ${
+        result.coverageSummary ? `(${result.coverageSummary.lines}% lines)` : ''
+      } |`,
+    );
+    lines.push(`| Lint 检查 | ${result.lintPassed ? '✅ 通过' : '❌ 失败'} |`);
+    lines.push(`| 类型检查 | ${result.typeCheckPassed ? '✅ 通过' : '❌ 失败'} |`);
     lines.push(`| 分支处理 | ${result.branchHandled ? '✅ 已处理' : '⚠️ 未处理'} |`);
     lines.push('');
     lines.push('## 结论');

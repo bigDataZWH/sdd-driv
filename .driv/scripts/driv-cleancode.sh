@@ -10,7 +10,7 @@ lint() {
   echo "driv-cleancode: 运行 lint..."
   if [ -f "$DRIV_ROOT/package.json" ]; then
     if grep -q '"lint"' "$DRIV_ROOT/package.json" 2>/dev/null; then
-      (cd "$DRIV_ROOT" && npm run lint) || true
+      (cd "$DRIV_ROOT" && npm run lint)
     else
       echo "driv-cleancode: 未配置 lint script，跳过"
     fi
@@ -20,7 +20,7 @@ lint() {
 format() {
   echo "driv-cleancode: 检查格式..."
   if command -v prettier &>/dev/null; then
-    prettier --check "$DRIV_ROOT/src" 2>/dev/null || echo "driv-cleancode: 格式需修正"
+    prettier --check "$DRIV_ROOT/src"
   else
     echo "driv-cleancode: prettier 未安装，跳过格式检查"
   fi
@@ -29,7 +29,7 @@ format() {
 typecheck() {
   echo "driv-cleancode: 类型检查..."
   if [ -f "$DRIV_ROOT/tsconfig.json" ]; then
-    (cd "$DRIV_ROOT" && npx tsc --noEmit 2>/dev/null) || echo "driv-cleancode: 类型检查发现问题"
+    (cd "$DRIV_ROOT" && npx tsc --noEmit)
   else
     echo "driv-cleancode: 未找到 tsconfig.json，跳过类型检查"
   fi

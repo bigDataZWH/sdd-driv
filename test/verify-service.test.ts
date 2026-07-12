@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -370,6 +370,169 @@ describe('VerifyService', () => {
       const result = verifyService.parseCommand('');
       expect(result.command).toBe('');
       expect(result.args).toEqual([]);
+    });
+  });
+
+  describe('Task 3+4: 覆盖率 + lint + typecheck 集成', () => {
+    async function setupPassingChange(changeName: string): Promise<string> {
+      const changeDir = path.join(tmpDir, 'openspec', 'changes', changeName);
+      fs.mkdirSync(changeDir, { recursive: true });
+      fs.writeFileSync(path.join(changeDir, 'tasks.md'), '- [ ] Task 1\n', 'utf-8');
+      const configDir = path.join(changeDir, '.driv');
+      fs.mkdirSync(configDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(configDir, 'config.yaml'),
+        'buildCmd: node -e process.exit(0)\ntestCmd: node -e process.exit(0)\n',
+        'utf-8',
+      );
+      await stateMachine.initChange(changeName);
+      return changeDir;
+    }
+
+    function writeCoverage(data: object): void {
+      const coverageDir = path.join(tmpDir, 'coverage');
+      fs.mkdirSync(coverageDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(coverageDir, 'coverage-summary.json'),
+        JSON.stringify(data),
+        'utf-8',
+      );
+    }
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    describe('覆盖率（Task 3）', () => {
+      it('coverage 文件存在且达标 → coveragePassed=true, coverageSummary 填充', async () => {
+        await setupPassingChange('cov-pass');
+        writeCoverage({
+          total: {
+            lines: { pct: 90 },
+            functions: { pct: 90 },
+            branches: { pct: 80 },
+            statements: { pct: 90 },
+          },
+        });
+
+        const result = await verifyService.verify('cov-pass');
+
+        expect(result.coveragePassed).toBe(true);
+        expect(result.coverageSummary).toBeDefined();
+        expect(result.coverageSummary?.lines).toBe(90);
+        expect(result.coverageSummary?.functions).toBe(90);
+        expect(result.coverageSummary?.branches).toBe(80);
+        expect(result.coverageSummary?.statements).toBe(90);
+      });
+
+      it('coverage 文件存在但不达标（lines 70%）→ coveragePassed=false, passed=false', async () => {
+        await setupPassingChange('cov-fail');
+        writeCoverage({
+          total: {
+            lines: { pct: 70 },
+            functions: { pct: 90 },
+            branches: { pct: 80 },
+            statements: { pct: 90 },
+          },
+        });
+
+        const result = await verifyService.verify('cov-fail');
+
+        expect(result.coveragePassed).toBe(false);
+        expect(result.passed).toBe(false);
+      });
+
+      it('coverage 文件不存在 → coveragePassed=true（向后兼容）, coverageSummary undefined', async () => {
+        await setupPassingChange('cov-missing');
+
+        const result = await verifyService.verify('cov-missing');
+
+        expect(result.coveragePassed).toBe(true);
+        expect(result.coverageSummary).toBeUndefined();
+      });
+    });
+
+    describe('lint（Task 4）', () => {
+      it('有 lint script 且通过 → lintPassed=true', async () => {
+        fs.writeFileSync(
+          path.join(tmpDir, 'package.json'),
+          JSON.stringify({ scripts: { lint: 'eslint src/' } }),
+          'utf-8',
+        );
+        vi.spyOn(verifyService as any, 'runCommand').mockResolvedValue(true);
+
+        const result = await verifyService.executeLint();
+
+        expect(result).toBe(true);
+      });
+
+      it('有 lint script 且失败 → lintPassed=false, passed=false', async () => {
+        await setupPassingChange('lint-fail');
+        fs.writeFileSync(
+          path.join(tmpDir, 'package.json'),
+          JSON.stringify({ scripts: { lint: 'eslint src/' } }),
+          'utf-8',
+        );
+        vi.spyOn(verifyService as any, 'runCommand').mockImplementation((cmd: string) => {
+          if (cmd === 'npm run lint') return Promise.resolve(false);
+          return Promise.resolve(true);
+        });
+
+        const result = await verifyService.verify('lint-fail');
+
+        expect(result.lintPassed).toBe(false);
+        expect(result.passed).toBe(false);
+      });
+
+      it('无 lint script → lintPassed=true（向后兼容）', async () => {
+        // tmpDir 中无 package.json
+        const result = await verifyService.executeLint();
+        expect(result).toBe(true);
+      });
+    });
+
+    describe('typecheck（Task 4）', () => {
+      it('有 tsconfig.json 且 typecheck 通过 → typeCheckPassed=true', async () => {
+        fs.writeFileSync(path.join(tmpDir, 'tsconfig.json'), '{}', 'utf-8');
+        vi.spyOn(verifyService as any, 'runCommand').mockResolvedValue(true);
+
+        const result = await verifyService.executeTypeCheck();
+
+        expect(result).toBe(true);
+      });
+
+      it('有 tsconfig.json 且 typecheck 失败 → typeCheckPassed=false, passed=false', async () => {
+        await setupPassingChange('tc-fail');
+        fs.writeFileSync(path.join(tmpDir, 'tsconfig.json'), '{}', 'utf-8');
+        vi.spyOn(verifyService as any, 'runCommand').mockImplementation((cmd: string) => {
+          if (cmd === 'npx tsc --noEmit') return Promise.resolve(false);
+          return Promise.resolve(true);
+        });
+
+        const result = await verifyService.verify('tc-fail');
+
+        expect(result.typeCheckPassed).toBe(false);
+        expect(result.passed).toBe(false);
+      });
+
+      it('无 tsconfig.json → typeCheckPassed=true（向后兼容）', async () => {
+        // tmpDir 中无 tsconfig.json
+        const result = await verifyService.executeTypeCheck();
+        expect(result).toBe(true);
+      });
+    });
+
+    describe('报告生成', () => {
+      it('验证报告包含"测试覆盖率"、"Lint 检查"、"类型检查"三行', async () => {
+        await setupPassingChange('report-rows');
+
+        const result = await verifyService.verify('report-rows');
+
+        const content = fs.readFileSync(result.reportPath, 'utf-8');
+        expect(content).toContain('测试覆盖率');
+        expect(content).toContain('Lint 检查');
+        expect(content).toContain('类型检查');
+      });
     });
   });
 });

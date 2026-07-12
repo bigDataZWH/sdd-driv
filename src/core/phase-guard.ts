@@ -465,6 +465,7 @@ export class PhaseGuardImpl implements PhaseGuard {
       );
     }
 
+    // tddMode 检查：分级校验
     if (!state.tddMode) {
       failures.push(
         fail(
@@ -473,6 +474,24 @@ export class PhaseGuardImpl implements PhaseGuard {
           '未设置',
           'error',
           'TDD 模式未选择，请选择 TDD 模式',
+        ),
+      );
+    } else if (state.tddMode === 'tdd') {
+      // 严格 TDD 模式：测试必须通过（测试未通过时由后续 tests 检查拦截）
+      // 这里不重复检查 tests === 'passed'，因为后续已有专门检查
+      // 但需确认 tddMode 为 'tdd' 时的特殊要求（如测试文件存在）
+      // 实际上，'tdd' 模式的强制校验由 tests === 'passed' 检查覆盖
+    } else if (state.tddMode === 'tdd-lite') {
+      // 宽松 TDD 模式：仅要求测试通过（由后续 tests 检查覆盖）
+    } else if (state.tddMode === 'no-tdd') {
+      // 跳过 TDD 强制校验，追加 warning
+      failures.push(
+        fail(
+          'tdd_mode_warning',
+          '使用 TDD 模式',
+          '未使用 TDD',
+          'warning',
+          '未使用 TDD 模式，建议启用 TDD 以提升代码质量',
         ),
       );
     }
