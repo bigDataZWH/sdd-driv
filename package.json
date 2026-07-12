@@ -9,7 +9,6 @@
     "dist/",
     ".opencode/",
     ".driv/",
-    "assets/",
     "package.json",
     "README.md",
     "README-zh.md"

@@ -34,7 +34,7 @@ describe('Driv 命令资产', () => {
     }
   });
 
-  it('driv-clarify 文案只要求生成 proposal.md 和 .openspec.yaml', () => {
+  it('driv-clarify 文案生成完整的 OpenSpec 交付件', () => {
     const root = process.cwd();
     const paths = [
       path.join(root, '.opencode', 'skills', 'driv-clarify', 'SKILL.md'),
@@ -45,15 +45,11 @@ describe('Driv 命令资产', () => {
       const content = fs.readFileSync(filePath, 'utf-8');
       expect(content).toContain('proposal.md');
       expect(content).toContain('.openspec.yaml');
-      expect(content).toContain('.driv/templates/proposals/default.md');
-      expect(content).toContain('不生成 `design.md`、`tasks.md`、`specs/`');
-      const normalized = content.replace(
-        /不生成 `design\.md`、`tasks\.md`、`specs\/`、`reviews\/`、`requirement-review\.md` 或 `\.driv\.yaml`。/g,
-        '',
-      );
-      expect(normalized).not.toMatch(
-        /创建或补全 proposal\/tasks|创建.*tasks|生成需求评审|proposal\/design\/specs\/tasks|proposal\/tasks\/spec|初始化.*\.driv\.yaml|更新.*\.driv\.yaml/,
-      );
+      expect(content).toContain('tasks.md');
+      expect(content).toContain('specs/');
+      expect(content).toContain('reviews/requirement-review.md');
+      expect(content).toContain('.driv.yaml');
+      expect(content).toContain('openspec-explore');
     }
   });
 

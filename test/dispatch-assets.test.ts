@@ -25,47 +25,10 @@ describe('子代理派遣契约', () => {
   });
 });
 
-describe('脚本资产', () => {
-  const scriptDir = path.resolve(import.meta.dirname || __dirname, '../assets');
-  const expectedScripts = [
-    'driv-clarify.sh',
-    'driv-design.sh',
-    'driv-build.sh',
-    'driv-verify.sh',
-    'driv-archive.sh',
-    'driv-review.sh',
-    'driv.sh',
-  ];
-
-  for (const script of expectedScripts) {
-    it(`${script} 存在且是有效 shell 脚本`, () => {
-      const fullPath = path.join(scriptDir, script);
-      expect(fs.existsSync(fullPath)).toBe(true);
-      const content = fs.readFileSync(fullPath, 'utf-8');
-      expect(content.startsWith('#!/usr/bin/env bash')).toBe(true);
-    });
-  }
-  it('driv-clarify.sh 只初始化 proposal.md 和 .openspec.yaml', () => {
-    const fullPath = path.join(scriptDir, 'driv-clarify.sh');
-    const content = fs.readFileSync(fullPath, 'utf-8');
-    expect(content).toContain('proposal.md');
-    expect(content).toContain('.openspec.yaml');
-    expect(content).toContain('.driv/templates/proposals/default.md');
-    expect(content).not.toMatch(
-      /tasks\.md|specs\/|design\.md|requirement-review|需求评审|\.driv\.yaml/,
-    );
-  });
-});
-
-describe('运行时脚本资产 (Section 4)', () => {
+describe('运行时脚本资产', () => {
   const scriptDir = path.resolve(import.meta.dirname || __dirname, '../.driv/scripts');
   const expectedScripts = [
     'driv-env.sh',
-    'driv-state.sh',
-    'driv-guard.sh',
-    'driv-handoff.sh',
-    'driv-archive.sh',
-    'driv-review.sh',
     'driv-cleancode.sh',
     'driv-validate.sh',
   ];
@@ -96,11 +59,9 @@ describe('运行时脚本资产 (Section 4)', () => {
   });
 
   it('Windows Git Bash: 路径含空格时仍可 source', () => {
-    // 模拟带空格路径引用 — 确保脚本中变量引用加了引号
     for (const script of expectedScripts) {
       const fullPath = path.join(scriptDir, script);
       const content = fs.readFileSync(fullPath, 'utf-8');
-      // source 行应使用双引号包裹路径
       const sourceLines = content
         .split('\n')
         .filter((l) => l.trim().startsWith('. ') || l.trim().startsWith('source '));
@@ -125,24 +86,5 @@ describe('运行时脚本资产 (Section 4)', () => {
       const hasAssignment = new RegExp(`^${v}=`, 'm').test(content);
       expect(hasExport || hasAssignment, `${v} 应被导出`).toBe(true);
     }
-  });
-
-  it('driv-state.sh 包含 readState/updateState/regenerateState 函数', () => {
-    const content = fs.readFileSync(path.join(scriptDir, 'driv-state.sh'), 'utf-8');
-    expect(content).toContain('readState()');
-    expect(content).toContain('updateState()');
-    expect(content).toContain('regenerateState()');
-  });
-
-  it('driv-guard.sh 包含 guardPhase/guardTransition 函数', () => {
-    const content = fs.readFileSync(path.join(scriptDir, 'driv-guard.sh'), 'utf-8');
-    expect(content).toContain('guardPhase()');
-    expect(content).toContain('guardTransition()');
-  });
-
-  it('driv-handoff.sh 包含 createHandoff/verifyHandoff 函数', () => {
-    const content = fs.readFileSync(path.join(scriptDir, 'driv-handoff.sh'), 'utf-8');
-    expect(content).toContain('createHandoff()');
-    expect(content).toContain('verifyHandoff()');
   });
 });
