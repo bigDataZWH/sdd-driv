@@ -1,0 +1,36 @@
+{
+  "version": "1",
+  "packageVersion": "0.1.0",
+  "assetsVersion": "1",
+  "skills": [
+    "driv",
+    "driv-clarify",
+    "driv-design",
+    "driv-build",
+    "driv-verify",
+    "driv-archive",
+    "driv-review",
+    "driv-cleancode",
+    "driv-hotfix",
+    "driv-tweak"
+  ],
+  "skillsZh": [
+    "driv",
+    "driv-clarify",
+    "driv-design",
+    "driv-build",
+    "driv-verify",
+    "driv-archive",
+    "driv-review",
+    "driv-cleancode",
+    "driv-hotfix",
+    "driv-tweak"
+  ],
+  "rules": [],
+  "hooks": {},
+  "languages": [
+    { "id": "en", "name": "English", "skillsDir": "skills" },
+    { "id": "zh", "name": "中文", "skillsDir": "skills" }
+  ],
+  "createdAt": "2026-06-28T00:00:00.000Z"
+}

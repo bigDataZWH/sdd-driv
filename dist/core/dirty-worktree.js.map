@@ -1,0 +1,1 @@
+{"version":3,"file":"dirty-worktree.js","sourceRoot":"","sources":["../../src/core/dirty-worktree.ts"],"names":[],"mappings":"AAWA,MAAM,OAAO,oBAAoB;IAC/B,KAAK,CAAC,KAAK,CAAC,WAAmB;QAC7B,OAAO,EAAE,KAAK,EAAE,KAAK,EAAE,OAAO,EAAE,EAAE,EAAE,CAAC;IACvC,CAAC;IAED,aAAa,CAAC,MAAgB,EAAE,WAAmB;QACjD,OAAO,EAAE,CAAC;IACZ,CAAC;CACF"}

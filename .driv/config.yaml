@@ -1,0 +1,9 @@
+project: driv
+version: 1
+workflow: full
+defaults:
+  build_mode: subagent-driven-development
+  tdd_mode: tdd
+  isolation: branch
+  verify_mode: light
+  context_compression: off

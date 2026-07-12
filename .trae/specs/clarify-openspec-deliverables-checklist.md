@@ -1,0 +1,12 @@
+- [x] Checkpoint 1: createDefaultState 中 clarify.artifacts 包含 proposal、design、tasks、specs、design-converted
+- [x] Checkpoint 2: createDefaultState 中 design.artifacts 包含 detailed-design-completed，不包含 design-converted
+- [x] Checkpoint 3: checkClarifyExit 验证 specs 数组非空
+- [x] Checkpoint 4: checkClarifyExit 验证 tasks 路径已设置
+- [x] Checkpoint 5: checkClarifyExit 验证 design-converted 状态为 true
+- [x] Checkpoint 6: checkDesignExit 验证 detailed-design-completed 状态为 true
+- [x] Checkpoint 7: checkDesignExit 不再检查 specs 数组
+- [x] Checkpoint 8: checkDesignExit 不再检查 design-converted 状态
+- [x] Checkpoint 9: StateMachine 包含 setDetailedDesignCompleted 方法
+- [x] Checkpoint 10: types.test.ts 所有测试通过
+- [x] Checkpoint 11: phase-guard.test.ts 所有测试通过
+- [x] Checkpoint 12: state-machine.test.ts 所有测试通过

@@ -1,0 +1,48 @@
+{
+  "name": "driv",
+  "version": "0.1.0",
+  "description": "Driv - OpenSpec + Superpowers workflow integration tool",
+  "license": "MIT",
+  "type": "module",
+  "files": [
+    "bin/",
+    "dist/",
+    ".opencode/",
+    ".driv/",
+    "assets/",
+    "package.json",
+    "README.md",
+    "README-zh.md"
+  ],
+  "bin": {
+    "driv": "./bin/driv.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/ test/",
+    "format": "prettier --write src/ test/",
+    "format:check": "prettier --check src/ test/",
+    "prepublish-check": "npm run typecheck && npm run lint && npm run format:check && npm test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^24.2.0",
+    "@typescript-eslint/eslint-plugin": "^8.62.0",
+    "@typescript-eslint/parser": "^8.62.0",
+    "eslint": "^10.6.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.6"
+  },
+  "dependencies": {
+    "commander": "^14.0.3",
+    "yaml": "^2.9.0"
+  }
+}

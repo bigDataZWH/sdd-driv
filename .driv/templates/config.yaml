@@ -1,0 +1,74 @@
+version: "1.0"
+
+proposals:
+  default: proposals/default.md
+  type_mapping:
+    feature: proposals/feature.md
+    bugfix: proposals/bugfix.md
+    refactor: proposals/refactor.md
+    config: proposals/config.md
+    docs: proposals/docs.md
+  types:
+    feature: feature
+    bugfix: bugfix
+    refactor: refactor
+    config: config
+    docs: docs
+
+designs:
+  default: designs/default.md
+  type_mapping:
+    feature: designs/feature.md
+    architecture: designs/architecture.md
+    interface: designs/interface.md
+    performance: designs/performance.md
+  types:
+    feature: feature
+    architecture: architecture
+    interface: interface
+    performance: performance
+
+specs:
+  default: specs/default.md
+  type_mapping:
+    capability: specs/capability.md
+    api: specs/api.md
+    component: specs/component.md
+    service: specs/service.md
+  types:
+    capability: capability
+    api: api
+    component: component
+    service: service
+
+reviews:
+  requirement: reviews/requirement-review.md
+  technical: reviews/technical-review.md
+  code: reviews/code-review.md
+
+inheritance:
+  enabled: true
+  rules: []
+
+placeholders:
+  system:
+    - change_name
+    - change_type
+    - created_at
+    - creator
+  user:
+    - description
+    - background
+    - goals
+  optional:
+    - performance_metrics
+    - security_requirements
+
+project_override:
+  enabled: true
+  search_paths:
+    - .driv/templates/custom/
+    - .driv/templates/proposals/custom/
+    - .driv/templates/designs/custom/
+    - .driv/templates/specs/custom/
+    - .driv/templates/reviews/custom/
