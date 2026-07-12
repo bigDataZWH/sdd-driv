@@ -112,15 +112,17 @@ describe('initCommand', () => {
     expect(fs.existsSync(path.join(tmpDir, '.driv'))).toBe(false);
   });
 
-  it('init --scope project 不创建 docs/superpowers 目录', async () => {
+  it('init --scope project 创建 docs/superpowers 目录', async () => {
     const { initCommand } = await import('../src/commands/init.js');
     await initCommand(tmpDir, ['opencode'], { scope: 'project' });
-    expect(fs.existsSync(path.join(tmpDir, 'docs', 'superpowers'))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, 'docs', 'superpowers'))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, 'docs', 'superpowers', 'specs'))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, 'docs', 'superpowers', 'plans'))).toBe(true);
   });
 
   it('返回安装结果摘要', async () => {
     const { initCommand } = await import('../src/commands/init.js');
-    const result = await initCommand(tmpDir, ['opencode']);
+    const result = await initCommand(tmpDir, ['opencode'], { scope: 'project' });
 
     expect(result.openspec).toBeDefined();
     expect(result.superpowers).toBeDefined();
@@ -133,7 +135,7 @@ describe('initCommand', () => {
 
   it('init 默认 scope 为 project', async () => {
     const { initCommand } = await import('../src/commands/init.js');
-    const result = await initCommand(tmpDir, ['opencode']);
+    const result = await initCommand(tmpDir, ['opencode'], { scope: 'project' });
     expect(result.scope).toBe('project');
   });
 

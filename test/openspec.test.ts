@@ -44,6 +44,22 @@ describe('buildOpenSpecInitInvocation', () => {
     const result = buildOpenSpecInitInvocation('/project', ['opencode'], 'project', false);
     expect(result.args).not.toContain('--profile');
   });
+
+  it('useNpx=true 时使用 npx 调用 openspec', async () => {
+    const { buildOpenSpecInitInvocation } = await import('../src/core/openspec.js');
+    const result = buildOpenSpecInitInvocation('/project', ['opencode'], 'project', true, true);
+    expect(result.command).toBe(process.platform === 'win32' ? 'npx.cmd' : 'npx');
+    expect(result.args).toContain('-y');
+    expect(result.args).toContain('@fission-ai/openspec');
+    expect(result.args).toContain('init');
+    expect(result.args).toContain('/project');
+  });
+
+  it('useNpx=true 且 includeProfile=false 时不包含 --profile', async () => {
+    const { buildOpenSpecInitInvocation } = await import('../src/core/openspec.js');
+    const result = buildOpenSpecInitInvocation('/project', ['opencode'], 'project', false, true);
+    expect(result.args).not.toContain('--profile');
+  });
 });
 
 describe('installOpenSpec', () => {

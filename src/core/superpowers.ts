@@ -1,4 +1,4 @@
-import { execFileSync } from 'child_process';
+import { execFileSafe } from './openspec.js';
 
 const SKILLS_AGENT_MAP: Record<string, string | null> = {
   opencode: 'opencode',
@@ -42,11 +42,10 @@ export async function installSuperpowersForPlatforms(
 
   const command = buildSuperpowersInstallCommand(projectPath, scope, platformIds);
   try {
-    execFileSync(command.command, command.args, {
+    execFileSafe(command.command, command.args, {
       cwd: projectPath,
       stdio: 'inherit',
       timeout: 300_000,
-      shell: process.platform === 'win32',
     });
     return 'installed';
   } catch {

@@ -1,3 +1,4 @@
+import type { InstallScope } from '../core/types.js';
 export interface InitResult {
     createdDirs: string[];
     skillsCopied: number;
@@ -9,11 +10,12 @@ export interface InitResult {
     openspec: string;
     superpowers: string;
     summary: string;
-    scope: 'project' | 'global';
+    scope: InstallScope;
+    codegraph: string;
 }
 export interface InitOptions {
     yes?: boolean;
-    scope?: 'project' | 'global';
+    scope?: InstallScope;
     skipExisting?: boolean;
     overwrite?: boolean;
     json?: boolean;

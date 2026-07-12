@@ -1,8 +1,11 @@
+import type { InstallScope } from '../core/types.js';
 export interface UpdateOptions {
     overwrite?: boolean;
     json?: boolean;
-    scope?: 'project' | 'global';
+    scope?: InstallScope;
     language?: string;
+    skipNpm?: boolean;
+    yes?: boolean;
 }
 export interface UpdateResult {
     commands: {
@@ -15,6 +18,8 @@ export interface UpdateResult {
     };
     scope: string;
     summary: string;
+    npmStatus?: 'updated' | 'failed' | 'skipped';
+    codegraph?: 'installed' | 'failed' | 'skipped';
 }
 export declare function getDrivSkills(): string[];
 export declare function updateCommand(targetPath: string, options?: UpdateOptions): Promise<UpdateResult>;

@@ -103,8 +103,9 @@ export interface DrivManifest {
     }[];
     createdAt: string;
 }
+export type InstallScope = 'project' | 'global';
 export interface InstallOptions {
-    scope: 'project' | 'global';
+    scope: InstallScope;
     overwrite: boolean;
     skipExisting?: boolean;
     language?: string;

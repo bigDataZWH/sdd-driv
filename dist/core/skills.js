@@ -1,7 +1,8 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import { fileURLToPath } from 'url';
-import { fileExists, ensureDir, writeFile } from '../utils/file-system.js';
+import { fileExists, ensureDir, writeFile, readJson } from '../utils/file-system.js';
+import { getPlatformSkillsDir } from './platforms.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DRIV_PACKAGE_ROOT = path.resolve(__dirname, '..', '..');
@@ -99,5 +100,315 @@ export function stripFrontmatter(content) {
         return content.trimStart();
     }
     return normalized.slice(end + '\n---\n'.length).trimStart();
+}
+async function readManifest() {
+    const manifestPath = path.join(DRIV_PACKAGE_ROOT, 'assets', 'manifest.json');
+    return readJson(manifestPath);
+}
+export async function copyDrivRulesForPlatform(baseDir, platform, overwrite, scope = 'project') {
+    if (!platform.rulesDir || !platform.rulesFormat) {
+        return { copied: 0, skipped: 0 };
+    }
+    const manifest = await readManifest();
+    const rulePaths = manifest.rules;
+    if (!rulePaths || rulePaths.length === 0) {
+        return { copied: 0, skipped: 0 };
+    }
+    const rulesBase = platform.rulesBaseDir !== undefined
+        ? platform.rulesBaseDir === ''
+            ? baseDir
+            : path.join(baseDir, platform.rulesBaseDir)
+        : path.join(baseDir, getPlatformSkillsDir(platform, scope));
+    let copied = 0;
+    let skippedCount = 0;
+    for (const ruleRelPath of rulePaths) {
+        const src = path.join(DRIV_PACKAGE_ROOT, '.driv', ruleRelPath);
+        if (!(await fileExists(src))) {
+            console.error(`    Rule source not found: ${ruleRelPath}`);
+            continue;
+        }
+        const ruleFileName = path.basename(ruleRelPath);
+        const rulesDestDir = path.join(rulesBase, platform.rulesDir);
+        const dest = computeRuleDestPath(rulesDestDir, ruleFileName, platform.rulesFormat);
+        if (!overwrite && (await fileExists(dest))) {
+            skippedCount++;
+            continue;
+        }
+        try {
+            const content = await fs.promises.readFile(src, 'utf-8');
+            await ensureDir(path.dirname(dest));
+            const formatted = formatRuleContent(content, ruleFileName, platform.rulesFormat);
+            await writeFile(dest, formatted);
+            copied++;
+        }
+        catch (err) {
+            console.error(`    Failed to copy rule ${ruleRelPath}: ${err.message}`);
+        }
+    }
+    return { copied, skipped: skippedCount };
+}
+function computeRuleDestPath(rulesDestDir, ruleFileName, rulesFormat) {
+    if (rulesFormat === 'mdc') {
+        return path.join(rulesDestDir, ruleFileName.replace(/\.md$/, '.mdc'));
+    }
+    if (rulesFormat === 'copilot') {
+        return path.join(rulesDestDir, ruleFileName.replace(/\.md$/, '.instructions.md'));
+    }
+    return path.join(rulesDestDir, ruleFileName);
+}
+function formatRuleContent(content, ruleFileName, rulesFormat) {
+    if (rulesFormat === 'mdc') {
+        return `---
+description: ${ruleFileName.replace(/\.md$/, '').replace(/-/g, ' ')}
+globs:
+alwaysApply: true
+---
+
+${content}`;
+    }
+    if (rulesFormat === 'copilot') {
+        return `---
+applyTo: "**"
+---
+
+${content}`;
+    }
+    return content;
+}
+export async function installDrivHooksForPlatform(baseDir, platform, scope = 'project') {
+    if (!platform.supportsHooks || !platform.hookFormat) {
+        return { installed: false, reason: 'platform does not support hooks' };
+    }
+    const manifest = await readManifest();
+    const hooksConfig = manifest.hooks;
+    if (!hooksConfig || Object.keys(hooksConfig).length === 0) {
+        return { installed: false, reason: 'no hooks defined in manifest' };
+    }
+    const hookFormat = platform.hookFormat;
+    const skillsDir = getPlatformSkillsDir(platform, scope);
+    const platformBase = path.join(baseDir, skillsDir);
+    try {
+        switch (hookFormat) {
+            case 'claude-code':
+                return installClaudeCodeHooks(platformBase, skillsDir, hooksConfig);
+            case 'qwen':
+            case 'qoder':
+                return installQwenStyleHooks(platformBase, skillsDir, hooksConfig);
+            case 'gemini':
+                return installGeminiHooks(platformBase, skillsDir, hooksConfig);
+            case 'windsurf':
+                return installWindsurfHooks(platformBase, skillsDir, hooksConfig);
+            case 'copilot':
+                return installCopilotHooks(platformBase, skillsDir, hooksConfig);
+            case 'kiro':
+                return installKiroHooks(platformBase, skillsDir, hooksConfig);
+            default:
+                return { installed: false, reason: `unsupported hook format: ${hookFormat}` };
+        }
+    }
+    catch (err) {
+        return { installed: false, reason: err.message };
+    }
+}
+function buildHookCommand(skillsDir, scriptRelPath) {
+    return `bash ${skillsDir}/skills/${scriptRelPath}`;
+}
+function isManagedHookCommand(command, scriptRelPaths) {
+    if (typeof command !== 'string')
+        return false;
+    const commandPath = command
+        .trim()
+        .match(/^bash\s+["']?([^"'\s]+)["']?(?:\s|$)/)?.[1]
+        ?.replace(/\\/g, '/');
+    if (!commandPath)
+        return false;
+    return scriptRelPaths.some((scriptRelPath) => commandPath.endsWith(`/skills/${scriptRelPath.replace(/\\/g, '/')}`));
+}
+function mergeHookGroups(existingGroups, newGroups, scriptRelPaths) {
+    const mergedGroups = existingGroups.flatMap((group) => {
+        if (!Array.isArray(group.hooks))
+            return [group];
+        const hooks = group.hooks.filter((hook) => !isManagedHookCommand(hook.command, scriptRelPaths));
+        if (hooks.length === 0 && group.hooks.length > 0)
+            return [];
+        return [{ ...group, hooks }];
+    });
+    for (const newGroup of newGroups) {
+        const existingGroup = mergedGroups.find((group) => group.matcher === newGroup.matcher && Array.isArray(group.hooks));
+        if (existingGroup) {
+            existingGroup.hooks = [...existingGroup.hooks, ...newGroup.hooks];
+        }
+        else {
+            mergedGroups.push(newGroup);
+        }
+    }
+    return mergedGroups;
+}
+function asHookGroup(value) {
+    return Array.isArray(value) ? value : [];
+}
+async function installClaudeCodeHooks(platformBase, skillsDir, hooksConfig) {
+    const settingsPath = path.join(platformBase, 'settings.local.json');
+    const matcherGroups = {};
+    for (const [scriptRelPath, config] of Object.entries(hooksConfig)) {
+        const command = buildHookCommand(skillsDir, scriptRelPath);
+        if (!matcherGroups[config.matcher]) {
+            matcherGroups[config.matcher] = [];
+        }
+        matcherGroups[config.matcher].push({ type: 'command', command });
+    }
+    const newEntries = Object.entries(matcherGroups).map(([matcher, hooks]) => ({ matcher, hooks }));
+    let settings = {};
+    if (await fileExists(settingsPath)) {
+        try {
+            settings = JSON.parse(await fs.promises.readFile(settingsPath, 'utf-8'));
+        }
+        catch {
+            settings = {};
+        }
+    }
+    const existingHooks = settings.hooks ?? {};
+    const existingPreToolUse = asHookGroup(existingHooks.PreToolUse);
+    const merged = mergeHookGroups(existingPreToolUse, newEntries, Object.keys(hooksConfig));
+    settings.hooks = { ...existingHooks, PreToolUse: merged };
+    await ensureDir(path.dirname(settingsPath));
+    await writeFile(settingsPath, JSON.stringify(settings, null, 2) + '\n');
+    return { installed: true };
+}
+async function installQwenStyleHooks(platformBase, skillsDir, hooksConfig) {
+    const settingsPath = path.join(platformBase, 'settings.json');
+    const matcherGroups = {};
+    for (const [scriptRelPath, config] of Object.entries(hooksConfig)) {
+        if (!matcherGroups[config.matcher]) {
+            matcherGroups[config.matcher] = [];
+        }
+        matcherGroups[config.matcher].push({
+            type: 'command',
+            command: buildHookCommand(skillsDir, scriptRelPath),
+            description: config.description,
+        });
+    }
+    const preToolUseEntries = Object.entries(matcherGroups).map(([matcher, hooks]) => ({
+        matcher,
+        hooks,
+    }));
+    let settings = {};
+    if (await fileExists(settingsPath)) {
+        try {
+            settings = JSON.parse(await fs.promises.readFile(settingsPath, 'utf-8'));
+        }
+        catch {
+            settings = {};
+        }
+    }
+    const existingHooks = settings.hooks ?? {};
+    const existingPreToolUse = asHookGroup(existingHooks.PreToolUse);
+    const merged = mergeHookGroups(existingPreToolUse, preToolUseEntries, Object.keys(hooksConfig));
+    settings.hooks = { ...existingHooks, PreToolUse: merged };
+    await ensureDir(path.dirname(settingsPath));
+    await writeFile(settingsPath, JSON.stringify(settings, null, 2) + '\n');
+    return { installed: true };
+}
+async function installGeminiHooks(platformBase, skillsDir, hooksConfig) {
+    const settingsPath = path.join(platformBase, 'settings.json');
+    const entries = [];
+    for (const [scriptRelPath, config] of Object.entries(hooksConfig)) {
+        entries.push({
+            matcher: config.matcher === 'Write|Edit' ? 'write_file|edit_file' : config.matcher,
+            hooks: [
+                {
+                    type: 'command',
+                    command: buildHookCommand(skillsDir, scriptRelPath),
+                    name: config.description,
+                },
+            ],
+        });
+    }
+    let settings = {};
+    if (await fileExists(settingsPath)) {
+        try {
+            settings = JSON.parse(await fs.promises.readFile(settingsPath, 'utf-8'));
+        }
+        catch {
+            settings = {};
+        }
+    }
+    const existingHooks = settings.hooks ?? {};
+    const existingBeforeTool = asHookGroup(existingHooks.BeforeTool);
+    const merged = mergeHookGroups(existingBeforeTool, entries, Object.keys(hooksConfig));
+    settings.hooks = { ...existingHooks, BeforeTool: merged };
+    await ensureDir(path.dirname(settingsPath));
+    await writeFile(settingsPath, JSON.stringify(settings, null, 2) + '\n');
+    return { installed: true };
+}
+async function installWindsurfHooks(platformBase, skillsDir, hooksConfig) {
+    const hooksPath = path.join(platformBase, 'hooks.json');
+    const entries = [];
+    for (const [scriptRelPath] of Object.entries(hooksConfig)) {
+        entries.push({
+            command: buildHookCommand(skillsDir, scriptRelPath),
+            show_output: true,
+        });
+    }
+    let hooksFile = {};
+    if (await fileExists(hooksPath)) {
+        try {
+            hooksFile = JSON.parse(await fs.promises.readFile(hooksPath, 'utf-8'));
+        }
+        catch {
+            hooksFile = {};
+        }
+    }
+    const existingHooks = hooksFile.hooks ?? {};
+    const existingPreWrite = asHookGroup(existingHooks.pre_write_code);
+    const merged = existingPreWrite.filter((entry) => !isManagedHookCommand(entry.command, Object.keys(hooksConfig)));
+    merged.push(...entries);
+    hooksFile.hooks = { ...existingHooks, pre_write_code: merged };
+    await ensureDir(path.dirname(hooksPath));
+    await writeFile(hooksPath, JSON.stringify(hooksFile, null, 2) + '\n');
+    return { installed: true };
+}
+async function installCopilotHooks(platformBase, skillsDir, hooksConfig) {
+    const hooksDir = path.join(platformBase, 'hooks');
+    const hookFilePath = path.join(hooksDir, 'driv-guard.json');
+    const scriptEntries = [];
+    for (const [scriptRelPath] of Object.entries(hooksConfig)) {
+        const cmd = buildHookCommand(skillsDir, scriptRelPath);
+        scriptEntries.push({ bash: cmd, powershell: `bash -c '${cmd}'` });
+    }
+    const hookConfig = {
+        version: 1,
+        hooks: {
+            preToolUse: scriptEntries,
+        },
+    };
+    await ensureDir(hooksDir);
+    await writeFile(hookFilePath, JSON.stringify(hookConfig, null, 2) + '\n');
+    return { installed: true };
+}
+async function installKiroHooks(platformBase, skillsDir, hooksConfig) {
+    const hooksDir = path.join(platformBase, 'hooks');
+    for (const [scriptRelPath, config] of Object.entries(hooksConfig)) {
+        const hookFileName = path.basename(scriptRelPath).replace(/\.sh$/, '.kiro.hook');
+        const hookFilePath = path.join(hooksDir, hookFileName);
+        const toolName = config.matcher === 'Write|Edit' ? 'write' : '*';
+        const hookConfig = {
+            enabled: true,
+            name: config.description,
+            description: config.description,
+            version: '1',
+            when: {
+                type: 'preToolUse',
+                toolName,
+            },
+            then: {
+                type: 'runCommand',
+                command: buildHookCommand(skillsDir, scriptRelPath),
+            },
+        };
+        await ensureDir(hooksDir);
+        await writeFile(hookFilePath, JSON.stringify(hookConfig, null, 2) + '\n');
+    }
+    return { installed: true };
 }
 //# sourceMappingURL=skills.js.map

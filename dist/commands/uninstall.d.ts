@@ -1,12 +1,11 @@
+import type { InstallScope } from '../core/types.js';
 export interface UninstallOptions {
     json?: boolean;
-    scope?: 'project' | 'global';
+    scope?: InstallScope;
     force?: boolean;
 }
-interface UninstallResult {
+export declare function uninstallCommand(targetPath: string, options?: UninstallOptions): Promise<{
     skillsRemoved: number;
     commandsRemoved: number;
     dirsRemoved: number;
-}
-export declare function uninstallCommand(targetPath: string, options?: UninstallOptions): Promise<UninstallResult>;
-export {};
+}>;

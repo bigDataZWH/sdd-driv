@@ -2,6 +2,18 @@ import { execFileSync } from 'child_process';
 export function getNpmExecutable(platform = process.platform) {
     return platform === 'win32' ? 'npm.cmd' : 'npm';
 }
+/**
+ * Run a command without triggering DEP0190.
+ * On Windows, .cmd/.bat files need cmd.exe wrapper when shell is false.
+ */
+export function execFileSafe(command, args, options) {
+    if (process.platform === 'win32' && (command.endsWith('.cmd') || command.endsWith('.bat'))) {
+        execFileSync('cmd', ['/c', command, ...args], { ...options, shell: false });
+    }
+    else {
+        execFileSync(command, args, { ...options, shell: false });
+    }
+}
 export function isCommandAvailable(command) {
     try {
         const checker = process.platform === 'win32' ? 'where' : 'which';
@@ -12,7 +24,17 @@ export function isCommandAvailable(command) {
         return false;
     }
 }
-export function buildOpenSpecInitInvocation(projectPath, toolIds, _scope, includeProfileFlag = true) {
+export function getNpxExecutable(platform = process.platform) {
+    return platform === 'win32' ? 'npx.cmd' : 'npx';
+}
+export function buildOpenSpecInitInvocation(projectPath, toolIds, _scope, includeProfileFlag = true, useNpx = false) {
+    if (useNpx) {
+        const args = ['-y', '@fission-ai/openspec', 'init', projectPath, '--tools', toolIds.join(',')];
+        if (includeProfileFlag) {
+            args.push('--profile', 'custom');
+        }
+        return { command: getNpxExecutable(), args };
+    }
     const args = ['init', projectPath, '--tools', toolIds.join(',')];
     if (includeProfileFlag) {
         args.push('--profile', 'custom');
@@ -20,43 +42,27 @@ export function buildOpenSpecInitInvocation(projectPath, toolIds, _scope, includ
     return { command: 'openspec', args };
 }
 export async function installOpenSpec(projectPath, toolIds, _scope) {
-    const cliReady = isCommandAvailable('openspec');
-    if (!cliReady) {
-        try {
-            execFileSync(getNpmExecutable(), ['install', '@fission-ai/openspec@latest'], {
-                cwd: projectPath,
-                stdio: 'inherit',
-                timeout: 120_000,
-                shell: process.platform === 'win32',
-            });
-        }
-        catch {
-            return 'failed';
-        }
-        if (!isCommandAvailable('openspec')) {
-            return 'failed';
-        }
-    }
+    // Always use npx to invoke openspec — reliable on all platforms,
+    // auto-downloads if not installed, finds global install if present
     try {
-        const invocation = buildOpenSpecInitInvocation(projectPath, toolIds, _scope);
-        execFileSync(invocation.command, invocation.args, {
+        const invocation = buildOpenSpecInitInvocation(projectPath, toolIds, _scope, true, true);
+        execFileSafe(invocation.command, invocation.args, {
             cwd: projectPath,
             stdio: ['inherit', 'inherit', 'pipe'],
             timeout: 120_000,
-            shell: process.platform === 'win32',
         });
         return 'installed';
     }
     catch (firstError) {
-        const stderrText = firstError.stderr?.toString() ?? '';
+        const err = firstError;
+        const stderrText = err.stderr?.toString() ?? '';
         if (stderrText.includes('unknown option') && stderrText.includes('--profile')) {
-            const fallbackInvocation = buildOpenSpecInitInvocation(projectPath, toolIds, _scope, false);
+            const fallbackInvocation = buildOpenSpecInitInvocation(projectPath, toolIds, _scope, false, true);
             try {
-                execFileSync(fallbackInvocation.command, fallbackInvocation.args, {
+                execFileSafe(fallbackInvocation.command, fallbackInvocation.args, {
                     cwd: projectPath,
                     stdio: 'inherit',
                     timeout: 120_000,
-                    shell: process.platform === 'win32',
                 });
                 return 'installed';
             }

@@ -106,6 +106,31 @@ async function checkOpenSpec(): Promise<DoctorResult> {
   };
 }
 
+async function checkCodeGraph(projectPath: string, scope: 'auto' | 'project' | 'global'): Promise<DoctorResult> {
+  if (!isCommandAvailable('codegraph')) {
+    return {
+      check: 'CodeGraph CLI',
+      status: 'warn',
+      message: 'not installed — install with: npm install -g @colbymchenry/codegraph',
+    };
+  }
+
+  if (scope === 'global') {
+    return { check: 'CodeGraph CLI', status: 'pass', message: 'installed' };
+  }
+
+  const codegraphDir = path.join(projectPath, '.codegraph');
+  if (!(await fileExists(codegraphDir))) {
+    return {
+      check: 'CodeGraph',
+      status: 'warn',
+      message: 'CLI installed but project not initialized — run: codegraph init -i',
+    };
+  }
+
+  return { check: 'CodeGraph', status: 'pass', message: 'initialized (.codegraph/ present)' };
+}
+
 async function checkWorkingDirs(projectPath: string): Promise<DoctorResult> {
   const specsDir = path.join(projectPath, 'docs', 'superpowers', 'specs');
   const plansDir = path.join(projectPath, 'docs', 'superpowers', 'plans');
@@ -223,6 +248,31 @@ async function checkDrivYamlValidity(projectPath: string): Promise<DoctorResult[
   return results;
 }
 
+async function checkScriptsPresent(): Promise<DoctorResult> {
+  const scriptDirs = [
+    path.join(os.homedir(), '.driv', 'scripts'),
+    path.join(process.cwd(), '.driv', 'scripts'),
+  ];
+
+  for (const scriptDir of scriptDirs) {
+    if (await fileExists(scriptDir)) {
+      const entries = await readDir(scriptDir);
+      const shFiles = entries.filter((e) => e.endsWith('.sh'));
+      return {
+        check: 'scripts',
+        status: 'pass',
+        message: `OK (${shFiles.length} scripts in ${scriptDir})`,
+      };
+    }
+  }
+
+  return {
+    check: 'scripts',
+    status: 'warn',
+    message: 'scripts directory not found in global or project scope',
+  };
+}
+
 function formatResults(results: DoctorResult[], scope: string): void {
   console.log(`Driv Doctor (scope: ${scope})\n`);
   for (const r of results) {
@@ -243,10 +293,12 @@ export async function doctorCommand(
   results.push(await checkNode());
   results.push(await checkGit());
   results.push(await checkOpenSpec());
+  results.push(await checkCodeGraph(projectPath, scope));
   if (scope !== 'global') {
     results.push(await checkWorkingDirs(projectPath));
   }
   results.push(...(await checkSkillCompleteness(projectPath, scope)));
+  results.push(await checkScriptsPresent());
   results.push(...(await checkDrivYamlValidity(projectPath)));
 
   if (options.json) {

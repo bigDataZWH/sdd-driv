@@ -92,6 +92,33 @@ export async function copyFile(src: string, dest: string): Promise<void> {
   await fs.promises.copyFile(src, dest);
 }
 
+export async function removeFile(filePath: string): Promise<boolean> {
+  try {
+    await fs.promises.unlink(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function removeDir(dirPath: string): Promise<boolean> {
+  try {
+    await fs.promises.rm(dirPath, { recursive: true, force: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function isDirEmpty(dirPath: string): Promise<boolean> {
+  try {
+    const entries = await fs.promises.readdir(dirPath);
+    return entries.length === 0;
+  } catch {
+    return true;
+  }
+}
+
 export async function copyDir(
   srcDir: string,
   destDir: string,

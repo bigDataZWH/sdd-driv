@@ -1,119 +1,389 @@
 import * as path from 'path';
-import * as fs from 'fs';
 import * as os from 'os';
-import { fileExists, ensureDir } from '../utils/file-system.js';
+import { select } from '@inquirer/prompts';
+import { fileExists, readDir, removeFile, removeDir, isDirEmpty } from '../utils/file-system.js';
 import { getDrivSkills } from './update.js';
+import { PLATFORMS, getPlatformSkillsDir, type Platform } from '../core/platforms.js';
+import { getBaseDir, hasSkills } from '../core/detect.js';
+import type { InstallScope } from '../core/types.js';
 
 export interface UninstallOptions {
   json?: boolean;
-  scope?: 'project' | 'global';
+  scope?: InstallScope;
   force?: boolean;
 }
 
-interface UninstallResult {
+interface TargetUninstallResult {
+  scope: InstallScope;
+  platform: string;
+  platformName: string;
   skillsRemoved: number;
-  commandsRemoved: number;
-  dirsRemoved: number;
+  rulesRemoved: number;
+  hooksRemoved: number;
 }
 
-const DRIV_DIRS = ['.driv', '.driv/templates'];
+interface RemovalResult {
+  removed: number;
+  failed: number;
+}
 
-const EXTRA_SKILLS = ['openspec-propose', 'openspec-apply', 'openspec-explore', 'openspec-archive'];
+async function removeDrivSkillsForPlatform(
+  baseDir: string,
+  platform: Platform,
+  scope: InstallScope = 'project',
+): Promise<{ skillsRemoved: number; commandsRemoved: number }> {
+  const drivSkills = getDrivSkills();
+  const extraSkills = ['openspec-propose', 'openspec-apply', 'openspec-explore', 'openspec-archive'];
+  const allSkills = [...drivSkills, ...extraSkills];
 
-export async function uninstallCommand(
-  targetPath: string,
-  options: UninstallOptions = {},
-): Promise<UninstallResult> {
-  const scope = options.scope ?? 'project';
-  const baseDir = scope === 'global' ? os.homedir() : path.resolve(targetPath);
-  const log = options.json ? () => undefined : console.log;
-  const result: UninstallResult = { skillsRemoved: 0, commandsRemoved: 0, dirsRemoved: 0 };
-
-  if (!options.json) {
-    log(`\n  Driv Uninstall (scope: ${scope})`);
-    log(`  Target: ${baseDir}\n`);
+  const skillsDir = getPlatformSkillsDir(platform, scope);
+  const skillsDirs = [skillsDir];
+  if (scope === 'global' && platform.id === 'pi') {
+    skillsDirs.push(platform.skillsDir);
   }
+  const uniqueSkillsDirs = [...new Set(skillsDirs)];
+  let skillsRemoved = 0;
+  let commandsRemoved = 0;
 
-  // Collect all driv skills to remove
-  const skillNames = [...getDrivSkills(), ...EXTRA_SKILLS];
-  const commandsDir = path.join(baseDir, '.opencode', 'commands');
-  const skillsDir = path.join(baseDir, '.opencode', 'skills');
-
-  // Preview
-  const existingSkills = skillNames.filter((name) =>
-    fs.existsSync(path.join(skillsDir, name, 'SKILL.md')),
-  );
-  const existingCommands = skillNames.filter((name) =>
-    fs.existsSync(path.join(commandsDir, `${name}.md`)),
-  );
-
-  if (existingSkills.length === 0 && existingCommands.length === 0) {
-    const msg = '  No Driv installations found. Nothing to uninstall.\n';
-    log(msg);
-    if (options.json) {
-      console.log(JSON.stringify(result, null, 2));
-    }
-    return result;
-  }
-
-  if (!options.json) {
-    log(`  Found:`);
-    if (existingSkills.length > 0) log(`    Skills: ${existingSkills.length}`);
-    if (existingCommands.length > 0) log(`    Commands: ${existingCommands.length}`);
-    log('');
-  }
-
-  // Confirm
-  if (!options.force && !options.json) {
-    const readline = await import('readline');
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    const answer = await new Promise<string>((resolve) => {
-      rl.question('  Remove all Driv skills and commands? (y/N): ', resolve);
-    });
-    rl.close();
-    if (answer.toLowerCase() !== 'y') {
-      log('  Cancelled.\n');
-      return result;
-    }
-  }
-
-  // Execute removal
-  for (const name of existingSkills) {
-    const dir = path.join(skillsDir, name);
-    await fs.promises.rm(dir, { recursive: true, force: true });
-    result.skillsRemoved++;
-  }
-
-  for (const name of existingCommands) {
-    const file = path.join(commandsDir, `${name}.md`);
-    try {
-      await fs.promises.unlink(file);
-      result.commandsRemoved++;
-    } catch {
-      // file may already be gone
-    }
-  }
-
-  // Remove working directories (project scope only)
-  if (scope === 'project') {
-    for (const dir of DRIV_DIRS) {
-      const fullPath = path.join(baseDir, dir);
-      if (fs.existsSync(fullPath)) {
-        await fs.promises.rm(fullPath, { recursive: true, force: true });
-        result.dirsRemoved++;
+  for (const targetSkillsDir of uniqueSkillsDirs) {
+    for (const skillName of allSkills) {
+      const skillDir = path.join(baseDir, targetSkillsDir, 'skills', skillName);
+      const result = await removeDir(skillDir);
+      if (result) {
+        skillsRemoved++;
       }
     }
   }
 
+  if (platform.id === 'opencode' || platform.id === 'trae') {
+    const commandsDir = path.join(baseDir, skillsDir, 'commands');
+    for (const skillName of allSkills) {
+      const commandFile = path.join(commandsDir, `${skillName}.md`);
+      const result = await removeFile(commandFile);
+      if (result) {
+        commandsRemoved++;
+      }
+    }
+  }
+
+  for (const targetSkillsDir of uniqueSkillsDirs) {
+    const skillsPath = path.join(baseDir, targetSkillsDir, 'skills');
+    if (await fileExists(skillsPath)) {
+      const entries = await readDir(skillsPath);
+      if (entries.length === 0) {
+        await removeDir(skillsPath);
+      }
+    }
+  }
+
+  return { skillsRemoved, commandsRemoved };
+}
+
+async function removeDrivRulesForPlatform(
+  baseDir: string,
+  platform: Platform,
+  scope: InstallScope = 'project',
+): Promise<RemovalResult> {
+  if (!platform.rulesDir) {
+    return { removed: 0, failed: 0 };
+  }
+
+  const skillsDir = getPlatformSkillsDir(platform, scope);
+  const rulesBase =
+    platform.rulesBaseDir !== undefined
+      ? platform.rulesBaseDir === ''
+        ? baseDir
+        : path.join(baseDir, platform.rulesBaseDir)
+      : path.join(baseDir, skillsDir);
+
+  const rulesDir = path.join(rulesBase, platform.rulesDir);
+  if (!(await fileExists(rulesDir))) {
+    return { removed: 0, failed: 0 };
+  }
+
+  let removed = 0;
+  const entries = await readDir(rulesDir);
+  for (const entry of entries) {
+    if (entry.startsWith('driv') || entry.startsWith('phase')) {
+      const filePath = path.join(rulesDir, entry);
+      if (await removeFile(filePath)) {
+        removed++;
+      }
+    }
+  }
+
+  if (await isDirEmpty(rulesDir)) {
+    await removeDir(rulesDir);
+  }
+
+  return { removed, failed: 0 };
+}
+
+async function removeDrivHooksForPlatform(
+  baseDir: string,
+  platform: Platform,
+  scope: InstallScope = 'project',
+): Promise<RemovalResult> {
+  if (!platform.supportsHooks || !platform.hookFormat) {
+    return { removed: 0, failed: 0 };
+  }
+
+  const skillsDir = getPlatformSkillsDir(platform, scope);
+  const platformBase = path.join(baseDir, skillsDir);
+
+  try {
+    switch (platform.hookFormat) {
+      case 'claude-code':
+      case 'qwen':
+      case 'qoder': {
+        const settingsPath = platform.hookFormat === 'claude-code'
+          ? path.join(platformBase, 'settings.local.json')
+          : path.join(platformBase, 'settings.json');
+        if (!(await fileExists(settingsPath))) {
+          return { removed: 0, failed: 0 };
+        }
+        const { readFile, writeFile } = await import('fs/promises');
+        let settings: Record<string, unknown>;
+        try {
+          settings = JSON.parse(await readFile(settingsPath, 'utf-8')) as Record<string, unknown>;
+        } catch {
+          return { removed: 0, failed: 0 };
+        }
+        if (settings.hooks) {
+          delete settings.hooks;
+          const content = JSON.stringify(settings, null, 2) + '\n';
+          await writeFile(settingsPath, content, 'utf-8');
+          return { removed: 1, failed: 0 };
+        }
+        break;
+      }
+      case 'gemini': {
+        const settingsPath = path.join(platformBase, 'settings.json');
+        if (!(await fileExists(settingsPath))) {
+          return { removed: 0, failed: 0 };
+        }
+        const { readFile, writeFile } = await import('fs/promises');
+        let settings: Record<string, unknown>;
+        try {
+          settings = JSON.parse(await readFile(settingsPath, 'utf-8')) as Record<string, unknown>;
+        } catch {
+          return { removed: 0, failed: 0 };
+        }
+        if (settings.hooks) {
+          delete settings.hooks;
+          const content = JSON.stringify(settings, null, 2) + '\n';
+          await writeFile(settingsPath, content, 'utf-8');
+          return { removed: 1, failed: 0 };
+        }
+        break;
+      }
+      case 'windsurf': {
+        const hooksPath = path.join(platformBase, 'hooks.json');
+        if (!(await removeFile(hooksPath))) {
+          return { removed: 0, failed: 0 };
+        }
+        return { removed: 1, failed: 0 };
+      }
+      case 'copilot': {
+        const hookFilePath = path.join(platformBase, 'hooks', 'driv-guard.json');
+        const removed = (await removeFile(hookFilePath)) ? 1 : 0;
+        const hooksDir = path.join(platformBase, 'hooks');
+        if (await isDirEmpty(hooksDir)) {
+          await removeDir(hooksDir);
+        }
+        return { removed, failed: 0 };
+      }
+      case 'kiro': {
+        const hooksDir = path.join(platformBase, 'hooks');
+        if (!(await fileExists(hooksDir))) {
+          return { removed: 0, failed: 0 };
+        }
+        let removed = 0;
+        const entries = await readDir(hooksDir);
+        for (const entry of entries) {
+          if (entry.startsWith('driv') && entry.endsWith('.kiro.hook')) {
+            const hookPath = path.join(hooksDir, entry);
+            if (await removeFile(hookPath)) {
+              removed++;
+            }
+          }
+        }
+        if (await isDirEmpty(hooksDir)) {
+          await removeDir(hooksDir);
+        }
+        return { removed, failed: 0 };
+      }
+    }
+  } catch {
+    return { removed: 0, failed: 1 };
+  }
+
+  return { removed: 0, failed: 0 };
+}
+
+async function removeWorkingDirs(projectPath: string): Promise<RemovalResult> {
+  let removed = 0;
+
+  const drivDir = path.join(projectPath, '.driv');
+  if (await removeDir(drivDir)) {
+    removed++;
+  }
+
+  return { removed, failed: 0 };
+}
+
+async function detectInstalledDrivTargets(
+  projectPath: string,
+  options: { scopes?: InstallScope[] } = {},
+): Promise<Array<{ scope: InstallScope; platform: Platform }>> {
+  const scopes = options.scopes ?? (['project', 'global'] as InstallScope[]);
+  const targets: Array<{ scope: InstallScope; platform: Platform }> = [];
+
+  for (const scope of scopes) {
+    const baseDir = scope === 'global' ? os.homedir() : projectPath;
+
+    for (const platform of PLATFORMS) {
+      if (!(await hasSkills(baseDir, platform, 'driv', [], scope))) continue;
+
+      targets.push({ scope, platform });
+    }
+  }
+
+  return targets;
+}
+
+export async function uninstallCommand(
+  targetPath: string,
+  options: UninstallOptions = {},
+): Promise<{ skillsRemoved: number; commandsRemoved: number; dirsRemoved: number }> {
+  const projectPath = path.resolve(targetPath);
+  const log = options.json ? () => undefined : console.log;
+
+  if (!options.json) {
+    log(`\n  Driv Uninstall\n`);
+  }
+
+  const targets = await detectInstalledDrivTargets(projectPath, {
+    scopes: options.scope ? [options.scope] : undefined,
+  });
+
+  if (targets.length === 0) {
+    if (options.json) {
+      console.log(JSON.stringify({ targets: [], results: [], workingDirsRemoved: 0 }, null, 2));
+    } else {
+      log('  No Driv installations found. Nothing to uninstall.\n');
+    }
+    return { skillsRemoved: 0, commandsRemoved: 0, dirsRemoved: 0 };
+  }
+
+  const scopeLabel = (scope: InstallScope) =>
+    scope === 'global' ? 'global' : `project (${projectPath})`;
+
+  if (!options.json) {
+    log('  Found Driv installations on the following targets:\n');
+    for (const target of targets) {
+      const skillsDir = getPlatformSkillsDir(target.platform, target.scope);
+      const prefix = target.scope === 'global' ? '~/' : '';
+      log(`    ${target.platform.name} (${scopeLabel(target.scope)})`);
+      log(`      Path: ${prefix}${skillsDir}/skills/`);
+    }
+    log('');
+  }
+
+  if (!options.force && !options.json) {
+    const confirmed = await select({
+      message: 'Remove all Driv skills, rules, and hooks from these targets?',
+      choices: [
+        { name: 'Yes, uninstall all', value: true },
+        { name: 'No, cancel', value: false },
+      ],
+    });
+
+    if (!confirmed) {
+      log('\n  Cancelled.\n');
+      return { skillsRemoved: 0, commandsRemoved: 0, dirsRemoved: 0 };
+    }
+  }
+
+  log('');
+  const results: TargetUninstallResult[] = [];
+  let totalSkills = 0;
+  let totalCommands = 0;
+  let totalRules = 0;
+  let totalHooks = 0;
+
+  for (const target of targets) {
+    const baseDir = getBaseDir(target.scope, projectPath);
+
+    const skillsResult = await removeDrivSkillsForPlatform(baseDir, target.platform, target.scope);
+    totalSkills += skillsResult.skillsRemoved;
+    totalCommands += skillsResult.commandsRemoved;
+
+    const rulesResult = await removeDrivRulesForPlatform(baseDir, target.platform, target.scope);
+    totalRules += rulesResult.removed;
+
+    const hooksResult = await removeDrivHooksForPlatform(baseDir, target.platform, target.scope);
+    totalHooks += hooksResult.removed;
+
+    log(
+      `  ${target.platform.name} (${target.scope}): ${skillsResult.skillsRemoved} skills, ${rulesResult.removed} rules, ${hooksResult.removed} hooks removed`,
+    );
+
+    results.push({
+      scope: target.scope,
+      platform: target.platform.id,
+      platformName: target.platform.name,
+      skillsRemoved: skillsResult.skillsRemoved,
+      rulesRemoved: rulesResult.removed,
+      hooksRemoved: hooksResult.removed,
+    });
+  }
+
+  let workingDirsRemoved = 0;
+  const hasProjectScope = targets.some((t) => t.scope === 'project');
+  if (hasProjectScope) {
+    const dirsResult = await removeWorkingDirs(projectPath);
+    workingDirsRemoved = dirsResult.removed;
+    if (workingDirsRemoved > 0) {
+      log(`  Working directories: ${workingDirsRemoved} removed`);
+    }
+  }
+
   if (options.json) {
-    console.log(JSON.stringify(result, null, 2));
+    console.log(
+      JSON.stringify(
+        {
+          targets: results.map((r) => ({
+            scope: r.scope,
+            platform: r.platform,
+            platformName: r.platformName,
+            skillsRemoved: r.skillsRemoved,
+            rulesRemoved: r.rulesRemoved,
+            hooksRemoved: r.hooksRemoved,
+          })),
+          workingDirsRemoved,
+          summary: {
+            targetsProcessed: results.length,
+            totalSkillsRemoved: totalSkills,
+            totalCommandsRemoved: totalCommands,
+            totalRulesRemoved: totalRules,
+            totalHooksRemoved: totalHooks,
+          },
+        },
+        null,
+        2,
+      ),
+    );
   } else {
-    log(`  Summary:`);
-    log(`    Skills removed: ${result.skillsRemoved}`);
-    log(`    Commands removed: ${result.commandsRemoved}`);
-    if (result.dirsRemoved > 0) log(`    Working directories removed: ${result.dirsRemoved}`);
+    log(`\n  Summary:`);
+    log(`    Targets: ${results.length}`);
+    log(`    Skills removed: ${totalSkills}`);
+    log(`    Commands removed: ${totalCommands}`);
+    log(`    Rules removed: ${totalRules}`);
+    log(`    Hooks removed: ${totalHooks}`);
+    if (workingDirsRemoved > 0) log(`    Working directories removed: ${workingDirsRemoved}`);
     log(`\n  Uninstall complete.\n`);
   }
 
-  return result;
+  return { skillsRemoved: totalSkills, commandsRemoved: totalCommands, dirsRemoved: workingDirsRemoved };
 }

@@ -15,6 +15,9 @@ export declare function writeFile(filePath: string, content: string): Promise<vo
 export declare function readDir(dir: string): Promise<string[]>;
 export declare function readJson<T = unknown>(filePath: string): Promise<T>;
 export declare function copyFile(src: string, dest: string): Promise<void>;
+export declare function removeFile(filePath: string): Promise<boolean>;
+export declare function removeDir(dirPath: string): Promise<boolean>;
+export declare function isDirEmpty(dirPath: string): Promise<boolean>;
 export declare function copyDir(srcDir: string, destDir: string, options?: {
     overwrite?: boolean;
     skipExisting?: boolean;
