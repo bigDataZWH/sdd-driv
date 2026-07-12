@@ -1,3 +1,21 @@
+<p align="center">
+  <a href="https://github.com/driv/devkit">
+    <picture>
+      <source srcset="https://www.vectorlogo.zone/logos/nodejs/nodejs-icon.svg">
+      <img src="https://www.vectorlogo.zone/logos/nodejs/nodejs-icon.svg" alt="Driv logo" width="120">
+    </picture>
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/driv"><img alt="npm version" src="https://img.shields.io/npm/v/driv?style=flat-square" /></a>
+  <a href="https://www.npmjs.com/package/driv"><img alt="npm download count" src="https://img.shields.io/npm/dm/driv?style=flat-square&label=Downloads/mo" /></a>
+  <a href="https://www.npmjs.com/package/driv"><img alt="npm weekly download count" src="https://img.shields.io/npm/dw/driv?style=flat-square&label=Downloads/wk" /></a>
+  <a href="./LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square" /></a>
+  <a href="https://nodejs.org/"><img alt="Node.js" src="https://img.shields.io/badge/Node.js-%3E%3D20-339933?style=flat-square&logo=node.js&logoColor=white" /></a>
+  <a href="./README.md"><img alt="English" src="https://img.shields.io/badge/README-English-blue?style=flat-square" /></a>
+</p>
+
 # driv
 
 ```
@@ -8,6 +26,8 @@
 ██████╔╝██║  ██║██║ ╚████╔╝
 ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝
 ```
+
+> English version: [README.md](README.md)
 
 **OpenSpec + Superpowers 双星工作流** — Clarify → Design → Build → Verify → Archive。
 
@@ -63,8 +83,88 @@ driv init
 | `driv doctor`     | 诊断安装健康状态            |
 | `driv update`     | 同步命令、技能、模板和脚本   |
 | `driv review`     | 评审创建、提交和状态检查     |
+| `driv uninstall`  | 移除 Driv 技能与命令        |
 | `driv --help`     | 显示帮助                   |
 | `driv --version`  | 显示版本                   |
+
+<details>
+<summary><code>driv init [path]</code> — 初始化 Driv 工作流</summary>
+
+为 OpenCode 平台安装 OpenSpec、Superpowers 和 Driv 技能。
+
+| 选项                 | 描述                                                       |
+| -------------------- | --------------------------------------------------------- |
+| `--yes`              | 非交互模式，自动安装缺失组件                                |
+| `--skip-existing`    | 不覆盖已存在的组件                                          |
+| `--overwrite`        | 覆盖已有文件                                               |
+| `--scope <scope>`    | 安装范围：`project` 或 `global`                            |
+| `--json`             | 输出结构化 JSON                                            |
+
+</details>
+
+<details>
+<summary><code>driv status [path]</code> — 显示活跃变更与工作流状态</summary>
+
+显示当前 change、阶段、门禁、报告及推荐的下一步。
+
+| 选项     | 描述                                              |
+| -------- | ------------------------------------------------- |
+| `--json` | 输出结构化 JSON，便于脚本化与集成                   |
+
+</details>
+
+<details>
+<summary><code>driv doctor [path]</code> — 诊断 Driv 安装健康状态</summary>
+
+检查工作目录、已安装技能、脚本、配置文件及活跃变更诊断。
+
+| 选项                | 描述                                                          |
+| ------------------- | ------------------------------------------------------------ |
+| `--json`            | 输出结构化 JSON                                              |
+| `--scope <scope>`   | 诊断范围：`auto`、`global` 或 `project`                       |
+
+</details>
+
+<details>
+<summary><code>driv update [path]</code> — 更新 Driv 技能文件到最新版本</summary>
+
+将命令、技能、模板、脚本同步到已安装 `driv` npm 包所携带的版本。
+
+| 选项                 | 描述                                                       |
+| -------------------- | --------------------------------------------------------- |
+| `--scope <scope>`    | 安装范围：`project` 或 `global`                            |
+| `--language <lang>`  | 技能语言：`en` 或 `zh`（跳过交互式语言提示）              |
+| `--overwrite`        | 覆盖已有命令                                               |
+| `--skip-npm`         | 跳过 npm 包自更新（内部）                                  |
+| `--json`             | 输出结构化 JSON                                            |
+
+</details>
+
+<details>
+<summary><code>driv uninstall [path]</code> — 移除 Driv 技能与命令</summary>
+
+从选定范围中移除 Driv 技能与命令，跨 macOS/Linux/Windows 安全可执行。
+
+| 选项                | 描述                                                          |
+| ------------------- | ------------------------------------------------------------ |
+| `--scope <scope>`   | 卸载范围：`project` 或 `global`                              |
+| `--force`           | 跳过确认提示                                                 |
+| `--json`            | 输出结构化 JSON                                              |
+
+</details>
+
+<details>
+<summary><code>driv review</code> — 管理 Driv 评审</summary>
+
+为活跃变更创建、提交并检查需求评审 / 技术评审 / 代码评审。
+
+| 选项              | 描述                                                                  |
+| ----------------- | -------------------------------------------------------------------- |
+| `--type <type>`   | 评审类型：`requirement`、`technical` 或 `code`                        |
+| `--change <name>` | 指定变更名称（省略时自动检测）                                       |
+| `--json`          | 输出结构化 JSON                                                      |
+
+</details>
 
 ## 工作流
 
