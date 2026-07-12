@@ -18,6 +18,7 @@ export declare class ArchiveService {
     checkPreconditions(changeName: string): Promise<string[]>;
     archive(changeName: string): Promise<ArchiveResult>;
     mergeDeltaSpec(changeName: string): Promise<boolean>;
+    private markSuperpowersArtifacts;
     rollback(changeName: string): Promise<void>;
     private copyDirRecursive;
     private rollbackForDir;

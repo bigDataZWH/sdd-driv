@@ -108,5 +108,13 @@ export class StateMachine {
         const yamlContent = this.parser.stringify(state);
         await this.fs.writeFile(filePath, yamlContent);
     }
+    async setBrainstormingPath(changeName, brainstormingPath) {
+        const state = await this.getState(changeName);
+        state.superpowers.brainstorming = brainstormingPath;
+        state.phases.design.artifacts.brainstorming = brainstormingPath;
+        const filePath = this.resolver.stateFile(changeName);
+        const yamlContent = this.parser.stringify(state);
+        await this.fs.writeFile(filePath, yamlContent);
+    }
 }
 //# sourceMappingURL=state-machine.js.map

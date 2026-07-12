@@ -102,6 +102,8 @@ export class ArchiveService {
       const handoffDir = path.join(changeDir, '.driv', 'handoff');
       await this.copyDirRecursive(handoffDir, path.join(archiveDir, 'handoff'));
 
+      await this.markSuperpowersArtifacts(changeName);
+
       specMerged = await this.mergeDeltaSpec(changeName);
 
       await this.updateIndex(changeName, dateStr);
@@ -190,6 +192,33 @@ export class ArchiveService {
     }
 
     return merged;
+  }
+
+  private async markSuperpowersArtifacts(changeName: string): Promise<void> {
+    const state = await this.stateMachine.getState(changeName);
+    const now = new Date().toISOString();
+    const changeDir = path.join(this.root, 'openspec', 'changes', changeName);
+    const stamp = `\n\n---\narchived-with: ${changeName}\nstatus: final\narchived-at: ${now}\n`;
+
+    const artifactPaths: string[] = [];
+    if (state.superpowers.plan) {
+      artifactPaths.push(path.join(this.root, state.superpowers.plan));
+    }
+    if (state.superpowers.brainstorming) {
+      artifactPaths.push(path.join(this.root, state.superpowers.brainstorming));
+    }
+
+    for (const artifactPath of artifactPaths) {
+      const absolutePath = path.isAbsolute(artifactPath)
+        ? artifactPath
+        : path.join(changeDir, path.basename(artifactPath));
+      if (await this.fs.exists(absolutePath)) {
+        const content = await this.fs.readFile(absolutePath);
+        if (!content.includes('archived-with:')) {
+          await this.fs.writeFile(absolutePath, content.trimEnd() + stamp);
+        }
+      }
+    }
   }
 
   async rollback(changeName: string): Promise<void> {

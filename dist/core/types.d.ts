@@ -65,6 +65,7 @@ export interface ChangeState {
     };
     superpowers: {
         plan?: string;
+        brainstorming?: string;
     };
     phases: Record<Phase, PhaseState>;
     buildMode: string;

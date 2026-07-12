@@ -32,12 +32,11 @@ $ARGUMENTS
 3. **生成 Change 名称** — 从输入推导 kebab-case change 名称，确保 `openspec/changes/<name>/` 存在
 4. **生成 proposal.md** — 使用 `.driv/templates/proposals/default.md` 模板，包含 8 条验收标准
 5. **生成 tasks.md** — 任务清单（跨 5 阶段，约 22 项）
-6. **生成 specs/<name>.md** — 能力规格（行为场景描述）
+6. **生成 specs/<capability>/spec.md** — 能力规格（行为场景描述），由 AI 直接基于 OpenSpec 模板生成，不经过 design-to-spec-converter 转换
 7. **生成 reviews/requirement-review.md** — 需求评审（AI 预检）
 8. **创建 .openspec.yaml** — 记录 schema、change、phase、status、created 和 proposal artifact
 9. **创建 .driv.yaml** — 初始化状态文件，设置 clarify 阶段为 in-progress
-10. **完成设计文档转换** — 调用 design-to-spec-converter 将设计内容转换为 OpenSpec 格式
-11. **输出结果** — 显示生成的文件清单和下一步 `/driv-design`
+10. **输出结果** — 显示生成的文件清单和下一步 `/driv-design`
 
 **Output**:
 
@@ -48,7 +47,7 @@ $ARGUMENTS
   - `openspec/changes/<name>/reviews/requirement-review.md` — 需求评审（AI 预检）
   - `openspec/changes/<name>/.openspec.yaml` — OpenSpec 元数据
   - `.driv.yaml` — 初始化状态文件
-- **状态更新**: phases.clarify（status/in-progress、artifacts/proposal/tasks/specs/design-converted）
+- **状态更新**: phases.clarify（status/in-progress、artifacts/proposal/tasks/specs）
 - **下一步**: Clarify 完成后调用 `/driv-design` 进入 Design 阶段
 
 ---

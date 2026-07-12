@@ -146,6 +146,25 @@ describe('BuildOrchestrator (1.1-1.5)', () => {
 
       expect(content).toMatch(/[0-9a-f]{64}/);
     });
+
+    it('plan 包含 canonical_spec frontmatter', async () => {
+      await setupBuildReady('test-change');
+      const planPath = await orchestrator.createPlan('test-change');
+      const content = fs.readFileSync(path.join(tmpDir, planPath), 'utf-8');
+
+      expect(content).toContain('canonical_spec: openspec');
+      expect(content).toContain('role: implementation-plan');
+      expect(content).toContain('driv_change: test-change');
+      expect(content).toContain('generated_by: BuildOrchestrator');
+    });
+
+    it('plan 包含 writing-plans 填充占位章节', async () => {
+      await setupBuildReady('test-change');
+      const planPath = await orchestrator.createPlan('test-change');
+      const content = fs.readFileSync(path.join(tmpDir, planPath), 'utf-8');
+
+      expect(content).toContain('实施步骤（由 writing-plans 技能填充）');
+    });
   });
 
   describe('1.4 setupModes', () => {

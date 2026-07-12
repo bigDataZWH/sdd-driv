@@ -23,7 +23,7 @@ description: 实现阶段 - 使用 TDD 模式落地代码实现
    - buildMode: executing-plans（默认）
    - tddMode: tdd（默认，强制使用 TDD 模式）
    - isolation: inline（默认）
-3. **创建 implementation plan** — 使用 writing-plans 技能生成实施计划，引用 OpenSpec `proposal.md`、`design.md`、`specs/`、`tasks.md`，输出到 `docs/superpowers/plans/YYYY-MM-DD-<name>.md`
+3. **创建 implementation plan** — 使用 writing-plans 技能生成实施计划，引用 OpenSpec `proposal.md`、`design.md`、`specs/`、`tasks.md`，输出到 `openspec/changes/<name>/plan.md`（BuildOrchestrator 已生成存根与 frontmatter，writing-plans 技能在"实施步骤"章节补充详细步骤，扩充时保留 frontmatter 的 `canonical_spec: openspec` 声明）
 4. **TDD 流程执行** — 按照 TDD 模式进行开发：
    - 编写测试用例（红色）
    - 编写实现代码（绿色）
@@ -39,15 +39,17 @@ description: 实现阶段 - 使用 TDD 模式落地代码实现
 **Output**:
 
 - **生成文件**:
-  - `docs/superpowers/plans/YYYY-MM-DD-<name>.md` — 实现计划
+  - `openspec/changes/<name>/plan.md` — 实现计划（BuildOrchestrator 存根 + writing-plans 技能扩充）
   - `index.html` — HTML 结构
   - `styles.css` — 样式文件
   - `app.js` — 应用逻辑
 - **修改文件**:
   - `.driv.yaml` — build.status=completed
   - `tasks.md` — B1-B7 勾选
-- **状态更新**: phases.build（status/completed、buildMode/tddMode/isolation）
+- **状态更新**: phases.build（status/completed、buildMode/tddMode/isolation、superpowers.plan）
 - **下一步**: Build 完成后调用 `/driv-verify` 进入 Verify 阶段
+
+> 注：`docs/superpowers/plans/` 目录用于 writing-plans 技能的中间草稿，正式产物为 `openspec/changes/<name>/plan.md`。
 
 ---
 Use the invocation arguments below as the user input for this workflow:

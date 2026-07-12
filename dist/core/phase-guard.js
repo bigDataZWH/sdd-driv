@@ -172,6 +172,9 @@ export class PhaseGuardImpl {
         if (state.hwProcess.technicalReview !== REVIEW_PASSED) {
             failures.push(fail('technical_review_passed', 'passed', state.hwProcess.technicalReview, 'error', '技术评审未通过，请先完成技术评审'));
         }
+        if (!state.superpowers.brainstorming) {
+            failures.push(fail('brainstorming_generated', 'brainstorming 路径已设置', '未设置', 'warning', 'Design 阶段未记录 brainstorming 产物路径，建议调用 setBrainstormingPath'));
+        }
         return buildResult('design', 'exit', failures);
     }
     checkBuildExit(state) {
@@ -196,6 +199,9 @@ export class PhaseGuardImpl {
         }
         if (state.hwProcess.codeReview !== REVIEW_PASSED) {
             failures.push(fail('code_review_passed', 'passed', state.hwProcess.codeReview, 'error', '代码评审未通过，请先完成代码评审'));
+        }
+        if (!state.superpowers.plan) {
+            failures.push(fail('superpowers_plan_set', 'superpowers.plan 已设置', '未设置', 'warning', 'Build 阶段未记录实施计划路径，建议调用 createPlan 生成 plan.md'));
         }
         return buildResult('build', 'exit', failures);
     }

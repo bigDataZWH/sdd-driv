@@ -73,9 +73,7 @@ function isInteractive(options: InitOptions): boolean {
 }
 
 async function createWorkingDirs(projectPath: string): Promise<void> {
-  const specsDir = path.join(projectPath, 'docs', 'superpowers', 'specs');
   const plansDir = path.join(projectPath, 'docs', 'superpowers', 'plans');
-  await ensureDir(specsDir);
   await ensureDir(plansDir);
 }
 
@@ -242,7 +240,6 @@ export async function initCommand(
     });
 
     await createWorkingDirs(targetPath);
-    createdDirs.push(path.join(targetPath, 'docs', 'superpowers', 'specs'));
     createdDirs.push(path.join(targetPath, 'docs', 'superpowers', 'plans'));
   }
 

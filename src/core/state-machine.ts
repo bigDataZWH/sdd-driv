@@ -109,17 +109,18 @@ export class StateMachine {
     await this.fs.writeFile(filePath, yamlContent);
   }
 
-  async setDesignConverted(changeName: string): Promise<void> {
+  async setDetailedDesignCompleted(changeName: string): Promise<void> {
     const state = await this.getState(changeName);
-    state.phases.clarify.artifacts['design-converted'] = 'true';
+    state.phases.design.artifacts['detailed-design-completed'] = 'true';
     const filePath = this.resolver.stateFile(changeName);
     const yamlContent = this.parser.stringify(state as unknown as Record<string, unknown>);
     await this.fs.writeFile(filePath, yamlContent);
   }
 
-  async setDetailedDesignCompleted(changeName: string): Promise<void> {
+  async setBrainstormingPath(changeName: string, brainstormingPath: string): Promise<void> {
     const state = await this.getState(changeName);
-    state.phases.design.artifacts['detailed-design-completed'] = 'true';
+    state.superpowers.brainstorming = brainstormingPath;
+    state.phases.design.artifacts.brainstorming = brainstormingPath;
     const filePath = this.resolver.stateFile(changeName);
     const yamlContent = this.parser.stringify(state as unknown as Record<string, unknown>);
     await this.fs.writeFile(filePath, yamlContent);

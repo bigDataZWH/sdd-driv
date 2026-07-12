@@ -116,7 +116,6 @@ describe('initCommand', () => {
     const { initCommand } = await import('../src/commands/init.js');
     await initCommand(tmpDir, ['opencode'], { scope: 'project' });
     expect(fs.existsSync(path.join(tmpDir, 'docs', 'superpowers'))).toBe(true);
-    expect(fs.existsSync(path.join(tmpDir, 'docs', 'superpowers', 'specs'))).toBe(true);
     expect(fs.existsSync(path.join(tmpDir, 'docs', 'superpowers', 'plans'))).toBe(true);
   });
 

@@ -38,7 +38,6 @@ describe('PhaseGuard', () => {
       state.openspec.specs = ['openspec/changes/test/specs/auth/spec.md'];
       state.openspec.tasks = 'openspec/changes/test/tasks.md';
       state.phases.clarify.status = 'completed';
-      state.phases.clarify.artifacts['design-converted'] = 'true';
 
       const result = await guard.checkExit('clarify', state);
 
@@ -71,10 +70,28 @@ describe('PhaseGuard', () => {
       state.phases.design.artifacts['detailed-design-completed'] = 'true';
       state.phases.design.artifacts.handoff = 'valid';
       state.hwProcess.technicalReview = 'passed';
+      state.superpowers.brainstorming = 'openspec/changes/test/brainstorming.md';
 
       const result = await guard.checkExit('design', state);
 
       expect(result.passed).toBe(true);
+    });
+
+    it('Design exit 在 brainstorming 未设置时产生 warning', async () => {
+      const { PhaseGuardImpl } = await import('../src/core/phase-guard.js');
+      const { createDefaultState } = await import('../src/core/types.js');
+      const guard = new PhaseGuardImpl();
+      const state = createDefaultState('test');
+      state.openspec.design = 'openspec/changes/test/design.md';
+      state.phases.design.status = 'completed';
+      state.phases.design.artifacts['detailed-design-completed'] = 'true';
+      state.phases.design.artifacts.handoff = 'valid';
+      state.hwProcess.technicalReview = 'passed';
+
+      const result = await guard.checkExit('design', state);
+
+      expect(result.failures.some((f) => f.check === 'brainstorming_generated')).toBe(true);
+      expect(result.failures.find((f) => f.check === 'brainstorming_generated')?.severity).toBe('warning');
     });
 
     it('Design exit 在 design 路径缺失时失败', async () => {
@@ -120,10 +137,30 @@ describe('PhaseGuard', () => {
       state.phases.build.artifacts['clean-code'] = 'passed';
       state.hwProcess.codeReview = 'passed';
       state.phases.build.artifacts['plan-created'] = 'true';
+      state.superpowers.plan = 'openspec/changes/test/plan.md';
 
       const result = await guard.checkExit('build', state);
 
       expect(result.passed).toBe(true);
+    });
+
+    it('Build exit 在 superpowers.plan 未设置时产生 warning', async () => {
+      const { PhaseGuardImpl } = await import('../src/core/phase-guard.js');
+      const { createDefaultState } = await import('../src/core/types.js');
+      const guard = new PhaseGuardImpl();
+      const state = createDefaultState('test');
+      state.buildMode = 'subagent-driven-development';
+      state.tddMode = 'tdd';
+      state.isolation = 'branch';
+      state.phases.build.artifacts.committed = 'true';
+      state.phases.build.artifacts.tests = 'passed';
+      state.phases.build.artifacts['clean-code'] = 'passed';
+      state.hwProcess.codeReview = 'passed';
+
+      const result = await guard.checkExit('build', state);
+
+      expect(result.failures.some((f) => f.check === 'superpowers_plan_set')).toBe(true);
+      expect(result.failures.find((f) => f.check === 'superpowers_plan_set')?.severity).toBe('warning');
     });
 
     it('Build exit 在 build_mode 未设置时失败', async () => {
@@ -270,7 +307,6 @@ describe('PhaseGuard', () => {
       state.openspec.specs = ['openspec/changes/test/specs/auth/spec.md'];
       state.openspec.tasks = 'openspec/changes/test/tasks.md';
       state.phases.clarify.status = 'completed';
-      state.phases.clarify.artifacts['design-converted'] = 'true';
 
       const transition = vi.fn();
       const stateMachine = { transition };

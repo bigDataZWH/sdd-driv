@@ -112,26 +112,12 @@ async function checkCodeGraph(projectPath, scope) {
     return { check: 'CodeGraph', status: 'pass', message: 'initialized (.codegraph/ present)' };
 }
 async function checkWorkingDirs(projectPath) {
-    const specsDir = path.join(projectPath, 'docs', 'superpowers', 'specs');
     const plansDir = path.join(projectPath, 'docs', 'superpowers', 'plans');
-    const specsExist = await fileExists(specsDir);
     const plansExist = await fileExists(plansDir);
-    if (specsExist && plansExist) {
+    if (plansExist) {
         return { check: 'working directories', status: 'pass', message: 'present' };
     }
-    if (!specsExist && !plansExist) {
-        return { check: 'working directories', status: 'fail', message: 'missing — run: driv init' };
-    }
-    const missing = [];
-    if (!specsExist)
-        missing.push('specs');
-    if (!plansExist)
-        missing.push('plans');
-    return {
-        check: 'working directories',
-        status: 'warn',
-        message: `partial (missing: ${missing.join(', ')})`,
-    };
+    return { check: 'working directories', status: 'fail', message: 'missing — run: driv init' };
 }
 async function checkVersion() {
     return {

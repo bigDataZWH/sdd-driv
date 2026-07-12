@@ -1,0 +1,15 @@
+- [x] Checkpoint 1: `src/core/design-to-spec-converter.ts` 文件已删除
+- [x] Checkpoint 2: `dist/core/design-to-spec-converter.{js,d.ts,js.map}` 编译产物已删除
+- [x] Checkpoint 3: `StateMachine` 不再包含 `setDesignConverted` 方法
+- [x] Checkpoint 4: `createDefaultState()` 的 `clarify.artifacts` 不包含 `design-converted` 键
+- [x] Checkpoint 5: `createDefaultState()` 的 `clarify.artifacts` 仍包含 `specs` 键
+- [x] Checkpoint 6: `checkClarifyExit` 不再检查 `design-converted` 状态
+- [x] Checkpoint 7: `checkClarifyExit` 仍检查 `state.openspec.specs` 为非空数组
+- [x] Checkpoint 8: driv-clarify SKILL.md 不再包含"完成设计文档转换"步骤
+- [x] Checkpoint 9: driv-clarify SKILL.md 第 6 步说明 AI 直接基于 OpenSpec 模板生成 spec
+- [x] Checkpoint 10: driv-clarify.md command 文档同步更新
+- [x] Checkpoint 11: `test/state-machine.test.ts` 不再包含 `setDesignConverted` 测试
+- [x] Checkpoint 12: `test/phase-guard.test.ts` 不再设置 `design-converted`
+- [x] Checkpoint 13: `test/review-system.test.ts` 不再设置 `design-converted`
+- [x] Checkpoint 14: `npm run typecheck` 通过
+- [x] Checkpoint 15: `npm test` 全部通过

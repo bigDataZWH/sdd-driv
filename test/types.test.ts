@@ -69,6 +69,8 @@ describe('Driv 基础类型定义', () => {
     expect(state.openspec.tasks).toBeUndefined();
     expect(state.openspec.specs).toEqual([]);
     expect(state.superpowers).toBeDefined();
+    expect(state.superpowers.plan).toBeUndefined();
+    expect(state.superpowers.brainstorming).toBeUndefined();
     expect(state.phases).toBeDefined();
     expect(state.phases.clarify).toBeDefined();
     expect(state.phases.design).toBeDefined();

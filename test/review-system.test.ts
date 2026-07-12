@@ -358,7 +358,6 @@ describe('ReviewSystem', () => {
     state.openspec.specs = ['specs/test/spec.md'];
     state.openspec.tasks = 'tasks.md';
     state.phases.clarify.status = 'completed';
-    state.phases.clarify.artifacts['design-converted'] = 'true';
 
     const result = await guard.checkExit('clarify', state);
     expect(result.passed).toBe(true);

@@ -166,6 +166,40 @@ describe('ArchiveService', () => {
       expect(result.archived).toBe(false);
       expect(result.errors.length).toBeGreaterThan(0);
     });
+
+    it('归档时为 superpowers.plan 文件追加 archived-with 戳记', async () => {
+      const changeDir = path.join(tmpDir, 'openspec', 'changes', changeName);
+      const statePath = path.join(changeDir, '.driv.yaml');
+      const { parse, stringify } = await import('yaml');
+      const state = parse(fs.readFileSync(statePath, 'utf-8'));
+      state.superpowers.plan = `openspec/changes/${changeName}/plan.md`;
+      fs.writeFileSync(statePath, stringify(state), 'utf-8');
+      fs.writeFileSync(path.join(changeDir, 'plan.md'), '# Plan content', 'utf-8');
+
+      const result = await archiveService.archive(changeName);
+
+      expect(result.archived).toBe(true);
+      const planContent = fs.readFileSync(path.join(changeDir, 'plan.md'), 'utf-8');
+      expect(planContent).toContain('archived-with: test-change');
+      expect(planContent).toContain('status: final');
+    });
+
+    it('归档时为 superpowers.brainstorming 文件追加 archived-with 戳记', async () => {
+      const changeDir = path.join(tmpDir, 'openspec', 'changes', changeName);
+      const statePath = path.join(changeDir, '.driv.yaml');
+      const { parse, stringify } = await import('yaml');
+      const state = parse(fs.readFileSync(statePath, 'utf-8'));
+      state.superpowers.brainstorming = `openspec/changes/${changeName}/brainstorming.md`;
+      fs.writeFileSync(statePath, stringify(state), 'utf-8');
+      fs.writeFileSync(path.join(changeDir, 'brainstorming.md'), '# Brainstorming', 'utf-8');
+
+      const result = await archiveService.archive(changeName);
+
+      expect(result.archived).toBe(true);
+      const bsContent = fs.readFileSync(path.join(changeDir, 'brainstorming.md'), 'utf-8');
+      expect(bsContent).toContain('archived-with: test-change');
+      expect(bsContent).toContain('status: final');
+    });
   });
 
   describe('4.4 mergeDeltaSpec', () => {

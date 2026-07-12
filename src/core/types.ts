@@ -82,6 +82,7 @@ export interface ChangeState {
   };
   superpowers: {
     plan?: string;
+    brainstorming?: string;
   };
   phases: Record<Phase, PhaseState>;
   buildMode: string;
@@ -147,7 +148,6 @@ export function createDefaultState(changeName: string): ChangeState {
           design: `${changeDir}/design.md`,
           tasks: `${changeDir}/tasks.md`,
           specs: `${changeDir}/specs.json`,
-          'design-converted': 'false',
         },
       },
       design: {

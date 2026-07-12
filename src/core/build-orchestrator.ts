@@ -70,6 +70,13 @@ export class BuildOrchestrator {
   private generatePlanContent(state: any, handoffHash: string): string {
     const today = new Date().toISOString().slice(0, 10);
     const lines: string[] = [
+      '---',
+      'canonical_spec: openspec',
+      'role: implementation-plan',
+      `driv_change: ${state.change}`,
+      'generated_by: BuildOrchestrator',
+      '---',
+      '',
       `# Plan: ${state.change}`,
       '',
       `- 创建日期: ${today}`,
@@ -104,6 +111,12 @@ export class BuildOrchestrator {
       '',
       `- Handoff Hash: \`${handoffHash}\``,
       '> 通过 HandoffManager 生成的上下文完整性校验。',
+      '',
+      '## 实施步骤（由 writing-plans 技能填充）',
+      '',
+      '> 此章节为存根占位。BuildOrchestrator 生成 plan.md 存根后，',
+      '> Superpowers writing-plans 技能在此章节补充详细实施步骤。',
+      '> 扩充内容时应保留上方 frontmatter 声明（canonical_spec: openspec）。',
     );
 
     return lines.join('\n');

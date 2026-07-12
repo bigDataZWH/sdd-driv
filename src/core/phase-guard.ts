@@ -306,18 +306,6 @@ export class PhaseGuardImpl implements PhaseGuard {
       );
     }
 
-    if (state.phases.clarify.artifacts['design-converted'] !== 'true') {
-      failures.push(
-        fail(
-          'design_converted',
-          'design-converted 为 true',
-          state.phases.clarify.artifacts['design-converted'] || '未设置',
-          'error',
-          'design-converted 未设置或不为 true，请先完成设计文档转换',
-        ),
-      );
-    }
-
     if (state.phases.clarify.status !== 'completed') {
       failures.push(
         fail(
@@ -392,6 +380,18 @@ export class PhaseGuardImpl implements PhaseGuard {
           state.hwProcess.technicalReview,
           'error',
           '技术评审未通过，请先完成技术评审',
+        ),
+      );
+    }
+
+    if (!state.superpowers.brainstorming) {
+      failures.push(
+        fail(
+          'brainstorming_generated',
+          'brainstorming 路径已设置',
+          '未设置',
+          'warning',
+          'Design 阶段未记录 brainstorming 产物路径，建议调用 setBrainstormingPath',
         ),
       );
     }
@@ -476,6 +476,18 @@ export class PhaseGuardImpl implements PhaseGuard {
           state.hwProcess.codeReview,
           'error',
           '代码评审未通过，请先完成代码评审',
+        ),
+      );
+    }
+
+    if (!state.superpowers.plan) {
+      failures.push(
+        fail(
+          'superpowers_plan_set',
+          'superpowers.plan 已设置',
+          '未设置',
+          'warning',
+          'Build 阶段未记录实施计划路径，建议调用 createPlan 生成 plan.md',
         ),
       );
     }

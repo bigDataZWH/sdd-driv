@@ -30,9 +30,7 @@ function isInteractive(options) {
     return !options.yes && !options.json && !options.scope && !options.overwrite && !options.skipExisting;
 }
 async function createWorkingDirs(projectPath) {
-    const specsDir = path.join(projectPath, 'docs', 'superpowers', 'specs');
     const plansDir = path.join(projectPath, 'docs', 'superpowers', 'plans');
-    await ensureDir(specsDir);
     await ensureDir(plansDir);
 }
 async function selectScope(options) {
@@ -156,7 +154,6 @@ export async function initCommand(projectPath, _platformIds, options = {}) {
             skipExisting: options.skipExisting ?? (options.yes ? true : undefined),
         });
         await createWorkingDirs(targetPath);
-        createdDirs.push(path.join(targetPath, 'docs', 'superpowers', 'specs'));
         createdDirs.push(path.join(targetPath, 'docs', 'superpowers', 'plans'));
     }
     const results = [];
