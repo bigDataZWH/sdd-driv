@@ -72,3 +72,7 @@ project_override:
     - .driv/templates/designs/custom/
     - .driv/templates/specs/custom/
     - .driv/templates/reviews/custom/
+
+# Preset 层：配置激活的预设名称，selectTemplate 会查找 .driv/templates/presets/<active>/<category>/<name>.md
+# presets:
+#   active: my-preset
