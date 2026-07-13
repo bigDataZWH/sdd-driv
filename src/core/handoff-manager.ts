@@ -289,9 +289,9 @@ export class HandoffManager {
         }
         const trimmed = line.replace(/^[-*\s]+/, '').trim();
         if (!trimmed) continue;
-        if (currentSection === 'decisions') {
+        if (currentSection === 'decisions' || currentSection === '决策') {
           decisions.push(trimmed);
-        } else if (currentSection === 'constraints') {
+        } else if (currentSection === 'constraints' || currentSection === '约束') {
           constraints.push(trimmed);
         }
       }

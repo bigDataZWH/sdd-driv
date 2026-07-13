@@ -39,9 +39,11 @@ export interface HandoffPayload {
 
 /** 子代理响应 */
 export interface SubagentResponse {
-  status: 'ok' | 'fail' | 'blocked';
+  status: 'ok' | 'fail' | 'blocked' | 'pending';
   output: string;
   errors?: string[];
+  recordId?: string;
+  startedAt?: string;
 }
 
 /** Build 阶段子代理调度记录 */
@@ -129,9 +131,17 @@ export class BuildOrchestrator {
   }
 
   recordPlan(plan: DispatchPlan): DispatchReport {
+    const startedAt = new Date().toISOString();
+    const results: SubagentResponse[] = plan.records.map((r) => ({
+      recordId: r.taskId,
+      status: 'pending',
+      output: '',
+      startedAt,
+    }));
+
     return {
       plan,
-      results: [],
+      results,
       verifications: [],
       successCount: 0,
       failCount: 0,

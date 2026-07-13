@@ -1,3 +1,5 @@
+import { validateEARS } from './ears-validator.js';
+import * as path from 'path';
 function succeed(phase, direction) {
     return { phase, direction, passed: true, failures: [] };
 }
@@ -10,15 +12,26 @@ function fail(check, expected, actual, severity, message) {
 const REVIEW_PASSED = 'passed';
 export class PhaseGuardImpl {
     dirtyWorktree;
-    constructor(dirtyWorktree) {
+    handoffManager;
+    fs;
+    schemaRegistry;
+    constructor(dirtyWorktree, handoffManager, fs, schemaRegistry) {
         this.dirtyWorktree = dirtyWorktree;
+        this.handoffManager = handoffManager;
+        this.fs = fs;
+        this.schemaRegistry = schemaRegistry;
+    }
+    resolvePath(p) {
+        if (!this.fs)
+            return p;
+        return path.isAbsolute(p) ? p : path.join(this.fs.root, p);
     }
     async checkEntry(phase, state) {
         switch (phase) {
             case 'design':
                 return this.checkDesignEntry(state);
             case 'build':
-                return this.checkBuildEntry(state);
+                return await this.checkBuildEntry(state);
             case 'verify':
                 return this.checkVerifyEntry(state);
             case 'archive':
@@ -40,7 +53,7 @@ export class PhaseGuardImpl {
         }
         return buildResult('design', 'entry', failures);
     }
-    checkBuildEntry(state) {
+    async checkBuildEntry(state) {
         const failures = [];
         if (state.phase !== 'build') {
             failures.push(fail('phase_is_build', 'build', state.phase, 'error', '当前阶段不是 build'));
@@ -55,13 +68,17 @@ export class PhaseGuardImpl {
             failures.push(fail('technical_review_passed', 'passed', state.hwProcess.technicalReview, 'error', '技术评审未通过'));
         }
         if (state.phases.design.artifacts.handoff) {
-            const hashValid = this.validateHandoffHash(state);
-            if (!hashValid) {
-                failures.push(fail('handoff_hash_valid', 'hash 匹配', 'hash 不匹配', 'warning', 'Handoff 已变更，建议重新生成'));
+            const mismatchedFiles = await this.validateHandoffHash(state);
+            if (mismatchedFiles.length > 0) {
+                failures.push(fail('handoff_hash_valid', 'hash 匹配', 'hash 不匹配', 'error', `Handoff 文件哈希不匹配: ${mismatchedFiles.join(', ')}`));
+            }
+            const intentFailure = await this.checkIntentAlignment(state);
+            if (intentFailure) {
+                failures.push(intentFailure);
             }
         }
         const dirtyResult = this.dirtyWorktree
-            ? { dirty: false, changes: [] }
+            ? await this.dirtyWorktree.check(state.change)
             : { dirty: false, changes: [] };
         if (dirtyResult.dirty) {
             failures.push(fail('dirty_worktree', '干净工作区', '有未提交变更', 'warning', '工作区存在未提交变更'));
@@ -103,13 +120,47 @@ export class PhaseGuardImpl {
         }
         return buildResult('archive', 'entry', failures);
     }
-    validateHandoffHash(_state) {
-        return true;
+    async validateHandoffHash(state) {
+        if (!this.handoffManager) {
+            return [];
+        }
+        return this.handoffManager.getMismatchedFiles(state.change);
+    }
+    async checkIntentAlignment(state) {
+        if (!this.handoffManager) {
+            return null;
+        }
+        const handoff = await this.handoffManager.getHandoffPackage(state.change);
+        if (!handoff || !handoff.context.intent) {
+            return null;
+        }
+        const intent = handoff.context.intent;
+        const designContent = await this.handoffManager.readChangeFile(state.change, 'design.md');
+        if (!designContent) {
+            return null;
+        }
+        if (this.intentAligned(designContent, intent)) {
+            return null;
+        }
+        return fail('intent_alignment', 'design 对齐 intent', 'design 可能偏离意图', 'warning', `设计文档可能偏离原始意图：${intent}`);
+    }
+    intentAligned(designContent, intent) {
+        const keywords = this.extractKeywords(intent);
+        if (keywords.length === 0) {
+            return true;
+        }
+        return keywords.some((kw) => designContent.includes(kw));
+    }
+    extractKeywords(intent) {
+        const words = intent
+            .split(/[\s,，。.;；:：!！?？()（）\[\]]+/)
+            .filter((w) => w.length >= 2);
+        return words.slice(0, 5);
     }
     async checkExit(phase, state) {
         switch (phase) {
             case 'clarify':
-                return this.checkClarifyExit(state);
+                return await this.checkClarifyExit(state);
             case 'design':
                 return this.checkDesignExit(state);
             case 'build':
@@ -133,7 +184,7 @@ export class PhaseGuardImpl {
         }
         return guardResult;
     }
-    checkClarifyExit(state) {
+    async checkClarifyExit(state) {
         const failures = [];
         if (!state.openspec.proposal) {
             failures.push(fail('proposal_exists', 'proposal 路径已设置', '未设置', 'error', '提案文件路径未设置，请先创建 proposal.md'));
@@ -147,11 +198,40 @@ export class PhaseGuardImpl {
         if (!state.openspec.tasks) {
             failures.push(fail('tasks_exists', 'tasks 路径已设置', '未设置', 'error', 'tasks 未设置，请先创建 tasks.md'));
         }
-        if (state.phases.clarify.artifacts['design-converted'] !== 'true') {
-            failures.push(fail('design_converted', 'design-converted 为 true', state.phases.clarify.artifacts['design-converted'] || '未设置', 'error', 'design-converted 未设置或不为 true，请先完成设计文档转换'));
-        }
         if (state.phases.clarify.status !== 'completed') {
             failures.push(fail('proposal_complete', 'clarify 阶段状态为 completed', state.phases.clarify.status, 'error', '提案未完成，请先完成 clarify 阶段'));
+        }
+        // advisory: SchemaRegistry 校验 proposal（best-effort，不阻断）
+        if (this.fs && this.schemaRegistry && state.openspec.proposal) {
+            try {
+                const content = await this.fs.readFile(this.resolvePath(state.openspec.proposal));
+                const parsed = this.schemaRegistry.parseArtifact(content);
+                const result = this.schemaRegistry.validate('proposal', parsed);
+                if (!result.valid) {
+                    failures.push(fail('proposal-schema-valid', 'proposal 符合 schema', 'schema 校验失败', 'warning', `proposal schema 校验失败: ${result.errors?.join('; ') ?? ''}`));
+                }
+            }
+            catch {
+                // best-effort，文件读取失败不阻断
+            }
+        }
+        // advisory: EARS 句式校验 specs（best-effort，不阻断）
+        if (this.fs && state.openspec.specs && state.openspec.specs.length > 0) {
+            for (const specsPath of state.openspec.specs) {
+                try {
+                    const resolvedSpecsPath = this.resolvePath(specsPath);
+                    if (await this.fs.exists(resolvedSpecsPath)) {
+                        const specContent = await this.fs.readFile(resolvedSpecsPath);
+                        const earsResult = validateEARS(specContent);
+                        if (!earsResult.valid) {
+                            failures.push(fail('ears-syntax', 'spec 符合 EARS 句式', '存在不符合 EARS 的语句', 'warning', `EARS 句式建议 (${specsPath}): ${earsResult.issues.join('; ')}`));
+                        }
+                    }
+                }
+                catch {
+                    // best-effort
+                }
+            }
         }
         return buildResult('clarify', 'exit', failures);
     }
@@ -182,8 +262,22 @@ export class PhaseGuardImpl {
         if (!state.buildMode) {
             failures.push(fail('build_mode_set', 'buildMode 已设置', '未设置', 'error', '构建模式未选择，请选择执行模式'));
         }
+        // tddMode 检查：分级校验
         if (!state.tddMode) {
             failures.push(fail('tdd_mode_set', 'tddMode 已设置', '未设置', 'error', 'TDD 模式未选择，请选择 TDD 模式'));
+        }
+        else if (state.tddMode === 'tdd') {
+            // 严格 TDD 模式：测试必须通过（测试未通过时由后续 tests 检查拦截）
+            // 这里不重复检查 tests === 'passed'，因为后续已有专门检查
+            // 但需确认 tddMode 为 'tdd' 时的特殊要求（如测试文件存在）
+            // 实际上，'tdd' 模式的强制校验由 tests === 'passed' 检查覆盖
+        }
+        else if (state.tddMode === 'tdd-lite') {
+            // 宽松 TDD 模式：仅要求测试通过（由后续 tests 检查覆盖）
+        }
+        else if (state.tddMode === 'no-tdd') {
+            // 跳过 TDD 强制校验，追加 warning
+            failures.push(fail('tdd_mode_warning', '使用 TDD 模式', '未使用 TDD', 'warning', '未使用 TDD 模式，建议启用 TDD 以提升代码质量'));
         }
         if (!state.isolation) {
             failures.push(fail('isolation_set', 'isolation 已设置', '未设置', 'error', '工作区隔离模式未选择，请选择隔离模式'));

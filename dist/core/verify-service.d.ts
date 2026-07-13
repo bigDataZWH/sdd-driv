@@ -12,6 +12,18 @@ export interface VerifyResult {
     branchHandled: boolean;
     reportPath: string;
     passed: boolean;
+    debugGateEnforced?: boolean;
+    investigateGuidance?: string;
+    coveragePassed?: boolean;
+    coverageSkipped?: boolean;
+    coverageSummary?: {
+        lines: number;
+        functions: number;
+        branches: number;
+        statements: number;
+    };
+    lintPassed?: boolean;
+    typeCheckPassed?: boolean;
 }
 export declare class VerifyService {
     private fs;
@@ -25,6 +37,9 @@ export declare class VerifyService {
     private readConfig;
     executeBuild(changeName: string): Promise<boolean>;
     executeTests(changeName: string): Promise<boolean>;
+    private readCoverage;
+    executeLint(): Promise<boolean>;
+    executeTypeCheck(): Promise<boolean>;
     private parseCommand;
     private runCommand;
     verify(changeName: string): Promise<VerifyResult>;

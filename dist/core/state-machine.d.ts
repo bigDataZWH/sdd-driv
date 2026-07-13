@@ -15,7 +15,6 @@ export declare class StateMachine {
     assessScale(tasks: string[], changedFiles: string[]): string;
     setDesignPath(changeName: string, designPath: string): Promise<void>;
     setSpecsPaths(changeName: string, specsPaths: string[]): Promise<void>;
-    setDesignConverted(changeName: string): Promise<void>;
     setDetailedDesignCompleted(changeName: string): Promise<void>;
     setBrainstormingPath(changeName: string, brainstormingPath: string): Promise<void>;
 }

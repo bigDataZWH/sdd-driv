@@ -1,5 +1,8 @@
 import { Phase, ChangeState } from './types.js';
 import { DirtyWorktreeChecker } from './dirty-worktree.js';
+import { HandoffManager } from './handoff-manager.js';
+import { FileSystem } from '../utils/file-system.js';
+import { SchemaRegistry } from './schema-registry.js';
 export type ReviewType = 'requirement' | 'technical' | 'code';
 export interface GuardFailure {
     check: string;
@@ -21,13 +24,20 @@ export interface PhaseGuard {
 }
 export declare class PhaseGuardImpl implements PhaseGuard {
     private dirtyWorktree?;
-    constructor(dirtyWorktree?: DirtyWorktreeChecker | undefined);
+    private handoffManager?;
+    private fs?;
+    private schemaRegistry?;
+    constructor(dirtyWorktree?: DirtyWorktreeChecker | undefined, handoffManager?: HandoffManager | undefined, fs?: FileSystem | undefined, schemaRegistry?: SchemaRegistry | undefined);
+    private resolvePath;
     checkEntry(phase: Phase, state: ChangeState): Promise<GuardResult>;
     private checkDesignEntry;
     private checkBuildEntry;
     private checkVerifyEntry;
     private checkArchiveEntry;
     private validateHandoffHash;
+    private checkIntentAlignment;
+    private intentAligned;
+    private extractKeywords;
     checkExit(phase: Phase, state: ChangeState): Promise<GuardResult>;
     applyTransition(from: Phase, to: Phase, state: ChangeState, stateMachine: any): Promise<GuardResult>;
     private checkClarifyExit;

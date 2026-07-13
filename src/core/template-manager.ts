@@ -83,6 +83,11 @@ function deepMerge<T>(base: T, override: Partial<T>): T {
     const k = key as keyof T;
     const ovVal = override[k];
     const baseVal = result[k];
+    if (Array.isArray(baseVal) && Array.isArray(ovVal)) {
+      // 合并数组并去重（保持顺序，优先保留 base 中已存在的元素）
+      result[k] = [...new Set([...baseVal, ...ovVal])] as unknown as T[keyof T];
+      continue;
+    }
     if (
       typeof ovVal === 'object' &&
       ovVal !== null &&
@@ -127,10 +132,29 @@ export class TemplateManager {
   private fs: FileSystem;
   private root: string;
   private configCache: TemplateConfig | null = null;
+  private frontmatterCache: Map<string, Record<string, unknown> | null> = new Map();
 
   constructor(fs: FileSystem, root: string) {
     this.fs = fs;
     this.root = root;
+  }
+
+  private parseFrontmatter(content: string): Record<string, unknown> | null {
+    const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+    if (!match) return null;
+    try {
+      const parsed = parseYaml(match[1]);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  getTemplateFrontmatter(type: TemplateType, name: string): Record<string, unknown> | null {
+    return this.frontmatterCache.get(`${type}/${name}`) ?? null;
   }
 
   private templatesDir(): string {
@@ -182,7 +206,10 @@ export class TemplateManager {
     if (!(await this.fs.exists(filePath))) {
       throw new Error(`模板不存在: ${type}/${name}`);
     }
-    return this.fs.readFile(filePath);
+    const content = await this.fs.readFile(filePath);
+    // 解析 frontmatter 并缓存，供 validateTemplate 等消费
+    this.frontmatterCache.set(`${type}/${name}`, this.parseFrontmatter(content));
+    return content;
   }
 
   async listTemplates(type?: TemplateType): Promise<TemplateInfo[]> {
@@ -270,8 +297,10 @@ export class TemplateManager {
       try {
         const parentContent = await this.loadTemplate(type, rule.parent);
         content = applyInheritance(parentContent, content, rule);
-      } catch {
-        // continue without inheritance
+      } catch (error) {
+        console.warn(
+          `[driv] 模板继承: 父模板 '${rule.parent}' 加载失败，使用子模板: ${(error as Error).message}`,
+        );
       }
     }
 
@@ -300,6 +329,21 @@ export class TemplateManager {
       warnings.push(`未解析占位符: ${p.name}`);
     }
 
+    // 校验 frontmatter 中声明的 placeholders_required 是否在模板中使用
+    const frontmatter = this.parseFrontmatter(content);
+    if (frontmatter) {
+      this.frontmatterCache.set(`${type}/${name}`, frontmatter);
+      const required = frontmatter.placeholders_required;
+      if (Array.isArray(required)) {
+        const missing = required
+          .filter((p): p is string => typeof p === 'string')
+          .filter((p) => !content.includes(`{{${p}}}`));
+        if (missing.length > 0) {
+          warnings.push(`缺少必填占位符: ${missing.join(', ')}`);
+        }
+      }
+    }
+
     const config = await this.getConfig();
     const rule = config.inheritance.rules.find((r) => r.child === name);
     if (rule) {
@@ -316,7 +360,8 @@ export class TemplateManager {
     const config = await this.getConfig();
     try {
       return resolveChain(config.inheritance.rules, name);
-    } catch {
+    } catch (error) {
+      console.warn(`[driv] 继承链解析失败: ${(error as Error).message}`);
       return [name];
     }
   }

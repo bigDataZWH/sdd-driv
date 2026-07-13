@@ -37,7 +37,10 @@ export declare class TemplateManager {
     private fs;
     private root;
     private configCache;
+    private frontmatterCache;
     constructor(fs: FileSystem, root: string);
+    private parseFrontmatter;
+    getTemplateFrontmatter(type: TemplateType, name: string): Record<string, unknown> | null;
     private templatesDir;
     private typeDir;
     private templatePath;

@@ -672,3 +672,422 @@ describe('2.x - Intent 对齐校验', () => {
     expect(result.failures.some((f) => f.check === 'intent_alignment')).toBe(false);
   });
 });
+
+describe('P3-1 - PhaseGuard 集成 SchemaRegistry', () => {
+  let tmpDir: string;
+  const changeName = 'schema-test-change';
+
+  beforeEach(async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'driv-phase-guard-schema-'));
+    const changeDir = path.join(tmpDir, 'openspec', 'changes', changeName);
+    await fs.promises.mkdir(path.join(changeDir, 'specs', 'auth'), { recursive: true });
+  });
+
+  afterEach(async () => {
+    await fs.promises.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  async function buildGuardWithProposal(proposalContent: string) {
+    const { PhaseGuardImpl } = await import('../src/core/phase-guard.js');
+    const { FileSystem } = await import('../src/utils/file-system.js');
+    const { SchemaRegistry } = await import('../src/core/schema-registry.js');
+    const { createDefaultState } = await import('../src/core/types.js');
+
+    const changeDir = path.join(tmpDir, 'openspec', 'changes', changeName);
+    await fs.promises.writeFile(path.join(changeDir, 'proposal.md'), proposalContent);
+
+    const fsImpl = new FileSystem(tmpDir);
+    const schemaRegistry = new SchemaRegistry();
+    const guard = new PhaseGuardImpl(undefined, undefined, fsImpl, schemaRegistry);
+    const state = createDefaultState(changeName);
+    state.openspec.proposal = path.join('openspec', 'changes', changeName, 'proposal.md');
+    state.openspec.design = path.join('openspec', 'changes', changeName, 'design.md');
+    state.openspec.tasks = path.join('openspec', 'changes', changeName, 'tasks.md');
+    state.openspec.specs = [];
+    state.phases.clarify.status = 'completed';
+    return { guard, state };
+  }
+
+  it('proposal 符合 schema 时不报 proposal-schema-valid 失败', async () => {
+    const { guard, state } = await buildGuardWithProposal('# 提案\n\n## 概述\n内容\n');
+    const result = await guard.checkExit('clarify', state);
+    expect(result.failures.some((f) => f.check === 'proposal-schema-valid')).toBe(false);
+  });
+
+  it('proposal 缺少标题时报 proposal-schema-valid warning', async () => {
+    // 无 # 标题 -> schema 校验失败
+    const { guard, state } = await buildGuardWithProposal('只有正文\n\n没有标题\n');
+    const result = await guard.checkExit('clarify', state);
+    const schemaFailure = result.failures.find((f) => f.check === 'proposal-schema-valid');
+    expect(schemaFailure).toBeDefined();
+    expect(schemaFailure?.severity).toBe('warning');
+    expect(schemaFailure?.message).toContain('proposal schema 校验失败');
+  });
+
+  it('proposal 内容为空时报 proposal-schema-valid warning', async () => {
+    const { guard, state } = await buildGuardWithProposal('   \n  ');
+    const result = await guard.checkExit('clarify', state);
+    const schemaFailure = result.failures.find((f) => f.check === 'proposal-schema-valid');
+    expect(schemaFailure).toBeDefined();
+    expect(schemaFailure?.severity).toBe('warning');
+  });
+
+  it('未注入 SchemaRegistry 时跳过 schema 校验', async () => {
+    const { PhaseGuardImpl } = await import('../src/core/phase-guard.js');
+    const { createDefaultState } = await import('../src/core/types.js');
+    const guard = new PhaseGuardImpl();
+    const state = createDefaultState(changeName);
+    state.openspec.proposal = 'openspec/changes/test/proposal.md';
+    state.openspec.design = 'design.md';
+    state.openspec.tasks = 'tasks.md';
+    state.openspec.specs = [];
+    state.phases.clarify.status = 'completed';
+    const result = await guard.checkExit('clarify', state);
+    expect(result.failures.some((f) => f.check === 'proposal-schema-valid')).toBe(false);
+  });
+
+  it('proposal 文件不存在时不阻断（best-effort）', async () => {
+    const { PhaseGuardImpl } = await import('../src/core/phase-guard.js');
+    const { FileSystem } = await import('../src/utils/file-system.js');
+    const { SchemaRegistry } = await import('../src/core/schema-registry.js');
+    const { createDefaultState } = await import('../src/core/types.js');
+    const fsImpl = new FileSystem(tmpDir);
+    const schemaRegistry = new SchemaRegistry();
+    const guard = new PhaseGuardImpl(undefined, undefined, fsImpl, schemaRegistry);
+    const state = createDefaultState(changeName);
+    // 指向不存在的文件
+    state.openspec.proposal = path.join('openspec', 'changes', changeName, 'missing.md');
+    state.openspec.design = 'design.md';
+    state.openspec.tasks = 'tasks.md';
+    state.openspec.specs = [];
+    state.phases.clarify.status = 'completed';
+    const result = await guard.checkExit('clarify', state);
+    // 读文件失败被 catch，不应产生 schema 失败
+    expect(result.failures.some((f) => f.check === 'proposal-schema-valid')).toBe(false);
+  });
+});
+
+describe('P3-2 - PhaseGuard 集成 EARS Validator', () => {
+  let tmpDir: string;
+  const changeName = 'ears-test-change';
+
+  beforeEach(async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'driv-phase-guard-ears-'));
+    const changeDir = path.join(tmpDir, 'openspec', 'changes', changeName);
+    await fs.promises.mkdir(path.join(changeDir, 'specs', 'auth'), { recursive: true });
+  });
+
+  afterEach(async () => {
+    await fs.promises.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  async function buildGuardWithSpec(specContent: string) {
+    const { PhaseGuardImpl } = await import('../src/core/phase-guard.js');
+    const { FileSystem } = await import('../src/utils/file-system.js');
+    const { createDefaultState } = await import('../src/core/types.js');
+
+    const specPath = path.join('openspec', 'changes', changeName, 'specs', 'auth', 'spec.md');
+    const fullSpecPath = path.join(tmpDir, specPath);
+    await fs.promises.writeFile(fullSpecPath, specContent);
+
+    const fsImpl = new FileSystem(tmpDir);
+    const guard = new PhaseGuardImpl(undefined, undefined, fsImpl);
+    const state = createDefaultState(changeName);
+    state.openspec.proposal = path.join('openspec', 'changes', changeName, 'proposal.md');
+    state.openspec.design = path.join('openspec', 'changes', changeName, 'design.md');
+    state.openspec.tasks = path.join('openspec', 'changes', changeName, 'tasks.md');
+    state.openspec.specs = [specPath];
+    state.phases.clarify.status = 'completed';
+    return { guard, state };
+  }
+
+  it('spec 全部符合 EARS 句式时不报 ears-syntax 失败', async () => {
+    const { guard, state } = await buildGuardWithSpec(
+      '# Spec\n\n## Requirements\n\nThe system SHALL log all operations.\n',
+    );
+    const result = await guard.checkExit('clarify', state);
+    expect(result.failures.some((f) => f.check === 'ears-syntax')).toBe(false);
+  });
+
+  it('spec 存在不符合 EARS 句式的语句时报 ears-syntax warning', async () => {
+    // "Logs shall be generated." 不以 "The system" 开头，不符合 EARS
+    const { guard, state } = await buildGuardWithSpec(
+      '# Spec\n\n## Requirements\n\nLogs shall be generated.\n',
+    );
+    const result = await guard.checkExit('clarify', state);
+    const earsFailure = result.failures.find((f) => f.check === 'ears-syntax');
+    expect(earsFailure).toBeDefined();
+    expect(earsFailure?.severity).toBe('warning');
+    expect(earsFailure?.message).toContain('EARS 句式建议');
+  });
+
+  it('spec 文件不存在时不报 ears-syntax 失败（best-effort）', async () => {
+    const { PhaseGuardImpl } = await import('../src/core/phase-guard.js');
+    const { FileSystem } = await import('../src/utils/file-system.js');
+    const { createDefaultState } = await import('../src/core/types.js');
+    const fsImpl = new FileSystem(tmpDir);
+    const guard = new PhaseGuardImpl(undefined, undefined, fsImpl);
+    const state = createDefaultState(changeName);
+    state.openspec.proposal = path.join('openspec', 'changes', changeName, 'proposal.md');
+    state.openspec.design = path.join('openspec', 'changes', changeName, 'design.md');
+    state.openspec.tasks = path.join('openspec', 'changes', changeName, 'tasks.md');
+    state.openspec.specs = [path.join('openspec', 'changes', changeName, 'specs', 'nope', 'spec.md')];
+    state.phases.clarify.status = 'completed';
+    const result = await guard.checkExit('clarify', state);
+    expect(result.failures.some((f) => f.check === 'ears-syntax')).toBe(false);
+  });
+
+  it('未注入 FileSystem 时跳过 EARS 校验', async () => {
+    const { PhaseGuardImpl } = await import('../src/core/phase-guard.js');
+    const { createDefaultState } = await import('../src/core/types.js');
+    const guard = new PhaseGuardImpl();
+    const state = createDefaultState(changeName);
+    state.openspec.proposal = 'proposal.md';
+    state.openspec.design = 'design.md';
+    state.openspec.tasks = 'tasks.md';
+    state.openspec.specs = ['openspec/changes/test/specs/auth/spec.md'];
+    state.phases.clarify.status = 'completed';
+    const result = await guard.checkExit('clarify', state);
+    expect(result.failures.some((f) => f.check === 'ears-syntax')).toBe(false);
+  });
+
+  it('多个 spec 路径时分别校验', async () => {
+    const { PhaseGuardImpl } = await import('../src/core/phase-guard.js');
+    const { FileSystem } = await import('../src/utils/file-system.js');
+    const { createDefaultState } = await import('../src/core/types.js');
+
+    const spec1Path = path.join('openspec', 'changes', changeName, 'specs', 'auth', 'spec.md');
+    const spec2Path = path.join('openspec', 'changes', changeName, 'specs', 'user', 'spec.md');
+    await fs.promises.mkdir(path.dirname(path.join(tmpDir, spec2Path)), { recursive: true });
+    await fs.promises.writeFile(
+      path.join(tmpDir, spec1Path),
+      '# Spec1\n\nThe system SHALL authenticate.\n',
+    );
+    await fs.promises.writeFile(
+      path.join(tmpDir, spec2Path),
+      '# Spec2\n\nLogs shall be generated.\n',
+    );
+
+    const fsImpl = new FileSystem(tmpDir);
+    const guard = new PhaseGuardImpl(undefined, undefined, fsImpl);
+    const state = createDefaultState(changeName);
+    state.openspec.proposal = path.join('openspec', 'changes', changeName, 'proposal.md');
+    state.openspec.design = path.join('openspec', 'changes', changeName, 'design.md');
+    state.openspec.tasks = path.join('openspec', 'changes', changeName, 'tasks.md');
+    state.openspec.specs = [spec1Path, spec2Path];
+    state.phases.clarify.status = 'completed';
+
+    const result = await guard.checkExit('clarify', state);
+    const earsFailures = result.failures.filter((f) => f.check === 'ears-syntax');
+    expect(earsFailures.length).toBe(1);
+    expect(earsFailures[0].message).toContain(spec2Path);
+  });
+});
+
+describe('P3-3 - ArchiveService 集成 DeltaSpecParser', () => {
+  let tmpDir: string;
+  let archiveService: InstanceType<any>;
+  const changeName = 'delta-strategy-test';
+
+  beforeEach(async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'driv-archive-delta-'));
+
+    const fsModule = await import('../src/utils/file-system.js');
+    const parserModule = await import('../src/utils/yaml-parser.js');
+    const smModule = await import('../src/core/state-machine.js');
+    const archiveModule = await import('../src/core/archive-service.js');
+    const resolverModule = await import('../src/core/path-resolver.js');
+
+    const fsImpl = new fsModule.FileSystem(tmpDir);
+    const parser = new parserModule.YamlParser(fsImpl);
+    const resolver = new resolverModule.PathResolver(tmpDir);
+    const sm = new smModule.StateMachine(fsImpl, parser, resolver);
+    archiveService = new archiveModule.ArchiveService(fsImpl, sm, parser, tmpDir);
+
+    await sm.initChange(changeName);
+    await sm.transition(changeName, 'design');
+    await sm.transition(changeName, 'build');
+    await sm.transition(changeName, 'verify');
+    await sm.transition(changeName, 'archive');
+
+    const changeDir = path.join(tmpDir, 'openspec', 'changes', changeName);
+    const statePath = path.join(changeDir, '.driv.yaml');
+    const { parse, stringify } = await import('yaml');
+    const state = parse(fs.readFileSync(statePath, 'utf-8'));
+    state.phases.verify.status = 'completed';
+    state.verifyResult = 'pass';
+    state.verifiedAt = new Date().toISOString();
+    state.archived = false;
+    fs.writeFileSync(statePath, stringify(state), 'utf-8');
+
+    fs.writeFileSync(path.join(changeDir, 'proposal.md'), '# Proposal', 'utf-8');
+    fs.writeFileSync(path.join(changeDir, 'design.md'), '# Design', 'utf-8');
+    fs.writeFileSync(path.join(changeDir, 'tasks.md'), '# Tasks', 'utf-8');
+    fs.mkdirSync(path.join(changeDir, 'reports'), { recursive: true });
+    fs.writeFileSync(
+      path.join(changeDir, 'reports', 'verification-report.md'),
+      '# Report',
+      'utf-8',
+    );
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('DeltaSpecParser 识别 ## REMOVED Requirements 为 supersede 策略', async () => {
+    const deltaSpecDir = path.join(
+      tmpDir,
+      'openspec',
+      'changes',
+      changeName,
+      'specs',
+      'removed-cap',
+    );
+    fs.mkdirSync(deltaSpecDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(deltaSpecDir, 'spec.md'),
+      '## REMOVED Requirements\n\n### Requirement: Old feature\nThe system SHALL old.\n',
+      'utf-8',
+    );
+    await archiveService.mergeDeltaSpec(changeName);
+    const mainSpecPath = path.join(tmpDir, 'openspec', 'specs', 'removed-cap', 'spec.md');
+    expect(fs.existsSync(mainSpecPath)).toBe(true);
+  });
+
+  it('DeltaSpecParser 识别 ## MODIFIED Requirements 为 update 策略', async () => {
+    const mainSpecDir = path.join(tmpDir, 'openspec', 'specs', 'mod-cap');
+    fs.mkdirSync(mainSpecDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(mainSpecDir, 'spec.md'),
+      '# Spec\n\n### Requirement: Mod feature\nThe system SHALL old.\n',
+      'utf-8',
+    );
+    const deltaSpecDir = path.join(
+      tmpDir,
+      'openspec',
+      'changes',
+      changeName,
+      'specs',
+      'mod-cap',
+    );
+    fs.mkdirSync(deltaSpecDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(deltaSpecDir, 'spec.md'),
+      '## MODIFIED Requirements\n\n### Requirement: Mod feature\nThe system SHALL new.\n',
+      'utf-8',
+    );
+    await archiveService.mergeDeltaSpec(changeName);
+    const mainSpec = fs.readFileSync(path.join(mainSpecDir, 'spec.md'), 'utf-8');
+    expect(mainSpec).toContain('SHALL new');
+    expect(mainSpec).not.toContain('SHALL old');
+  });
+});
+
+describe('schema-registry 单元测试', () => {
+  it('parseArtifact 提取 frontmatter 与 body', async () => {
+    const { SchemaRegistry } = await import('../src/core/schema-registry.js');
+    const reg = new SchemaRegistry();
+    const parsed = reg.parseArtifact('---\ntemplate: x\nversion: 1.0\n---\n\n# Title\n\nbody\n');
+    expect(parsed.frontmatter?.template).toBe('x');
+    expect(parsed.body).toContain('# Title');
+    expect(parsed.body).not.toContain('---');
+    expect(parsed.sections).toContain('# Title');
+  });
+
+  it('validate 无 schema 类型时返回 valid', async () => {
+    const { SchemaRegistry } = await import('../src/core/schema-registry.js');
+    const reg = new SchemaRegistry();
+    const result = reg.validate('unknown-type', { body: 'x' });
+    expect(result.valid).toBe(true);
+  });
+
+  it('validate 缺少必需章节时报错', async () => {
+    const { SchemaRegistry } = await import('../src/core/schema-registry.js');
+    const reg = new SchemaRegistry();
+    const parsed = reg.parseArtifact('仅文本无标题');
+    const result = reg.validate('proposal', parsed);
+    expect(result.valid).toBe(false);
+    expect(result.errors?.some((e) => /缺少必需章节/.test(e))).toBe(true);
+  });
+});
+
+describe('ears-validator 单元测试', () => {
+  it('符合 EARS 句式的 spec 通过校验', async () => {
+    const { validateEARS } = await import('../src/core/ears-validator.js');
+    const result = validateEARS(
+      '# Spec\n\n## Requirements\n\nThe system SHALL log all operations.\nWhen user logs in, the system SHALL redirect to dashboard.\n',
+    );
+    expect(result.valid).toBe(true);
+    expect(result.issues).toHaveLength(0);
+  });
+
+  it('不符合 EARS 句式的语句被记录', async () => {
+    const { validateEARS } = await import('../src/core/ears-validator.js');
+    const result = validateEARS('# Spec\n\nLogs shall be generated.\n');
+    expect(result.valid).toBe(false);
+    expect(result.issues.length).toBeGreaterThan(0);
+    expect(result.issues[0]).toContain('EARS');
+  });
+
+  it('WHEN/WHILE/WHERE/IF 句式均通过', async () => {
+    const { validateEARS } = await import('../src/core/ears-validator.js');
+    const result = validateEARS(
+      'When trigger fires, the system SHALL respond.\nWhile idle, the system SHALL sleep.\nWhere feature is enabled, the system SHALL activate.\nIf error occurs, then the system SHALL retry.\n',
+    );
+    expect(result.valid).toBe(true);
+  });
+});
+
+describe('delta-spec-parser 单元测试', () => {
+  it('解析 ADDED/MODIFIED/REMOVED 三类 requirement', async () => {
+    const { parseDeltaSpec } = await import('../src/core/delta-spec-parser.js');
+    const delta = parseDeltaSpec(
+      [
+        '## ADDED Requirements',
+        '',
+        '### Requirement: New feature',
+        'The system SHALL new.',
+        '',
+        '## MODIFIED Requirements',
+        '',
+        '### Requirement: Changed feature',
+        'The system SHALL changed.',
+        '',
+        '## REMOVED Requirements',
+        '',
+        '### Requirement: Old feature',
+        'The system SHALL old.',
+      ].join('\n'),
+    );
+    expect(delta.added).toEqual(['New feature']);
+    expect(delta.modified).toEqual(['Changed feature']);
+    expect(delta.removed).toEqual(['Old feature']);
+  });
+
+  it('UPDATED Requirements 归类为 modified', async () => {
+    const { parseDeltaSpec } = await import('../src/core/delta-spec-parser.js');
+    const delta = parseDeltaSpec(
+      '## UPDATED Requirements\n\n### Requirement: Upd feature\nThe system SHALL upd.\n',
+    );
+    expect(delta.modified).toEqual(['Upd feature']);
+    expect(delta.added).toHaveLength(0);
+    expect(delta.removed).toHaveLength(0);
+  });
+
+  it('SUPERSEDE 归类为 removed', async () => {
+    const { parseDeltaSpec } = await import('../src/core/delta-spec-parser.js');
+    const delta = parseDeltaSpec(
+      '## SUPERSEDE\n\n### Requirement: Old\nThe system SHALL old.\n',
+    );
+    expect(delta.removed).toEqual(['Old']);
+  });
+
+  it('空内容返回空 delta', async () => {
+    const { parseDeltaSpec } = await import('../src/core/delta-spec-parser.js');
+    const delta = parseDeltaSpec('# 仅标题\n\n无章节');
+    expect(delta.added).toHaveLength(0);
+    expect(delta.modified).toHaveLength(0);
+    expect(delta.removed).toHaveLength(0);
+  });
+});

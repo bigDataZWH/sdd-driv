@@ -112,3 +112,7 @@ export interface InstallOptions {
     language?: string;
 }
 export declare function createDefaultState(changeName: string): ChangeState;
+/** 从 .driv/config.yaml 读取 defaults 段，用于覆盖 createDefaultState 的默认值 */
+export declare function readDrivConfigDefaults(root: string): Promise<Partial<Pick<ChangeState, 'buildMode' | 'tddMode' | 'isolation' | 'verifyMode' | 'contextCompression'>>>;
+/** 用 .driv/config.yaml 的 defaults 段覆盖 ChangeState 中的默认值 */
+export declare function applyConfigDefaults(state: ChangeState, root: string): Promise<ChangeState>;

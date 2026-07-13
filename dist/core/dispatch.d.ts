@@ -33,9 +33,11 @@ export interface HandoffPayload {
 }
 /** 子代理响应 */
 export interface SubagentResponse {
-    status: 'ok' | 'fail' | 'blocked';
+    status: 'ok' | 'fail' | 'blocked' | 'pending';
     output: string;
     errors?: string[];
+    recordId?: string;
+    startedAt?: string;
 }
 /** Build 阶段子代理调度记录 */
 export interface SubagentDispatchRecord {

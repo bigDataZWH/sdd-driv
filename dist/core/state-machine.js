@@ -94,13 +94,6 @@ export class StateMachine {
         const yamlContent = this.parser.stringify(state);
         await this.fs.writeFile(filePath, yamlContent);
     }
-    async setDesignConverted(changeName) {
-        const state = await this.getState(changeName);
-        state.phases.clarify.artifacts['design-converted'] = 'true';
-        const filePath = this.resolver.stateFile(changeName);
-        const yamlContent = this.parser.stringify(state);
-        await this.fs.writeFile(filePath, yamlContent);
-    }
     async setDetailedDesignCompleted(changeName) {
         const state = await this.getState(changeName);
         state.phases.design.artifacts['detailed-design-completed'] = 'true';

@@ -1,4 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 
 describe('Driv 基础类型定义', () => {
   it('Phase 类型包含全部五个阶段', async () => {
@@ -80,5 +83,94 @@ describe('Driv 基础类型定义', () => {
     expect(state.contextCompression).toBe('off');
     expect(state.archived).toBe(false);
     expect(state.branchStatus).toBeUndefined();
+  });
+});
+
+describe('config.yaml defaults 读取', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'driv-types-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('readDrivConfigDefaults 读取 .driv/config.yaml 的 defaults 段', async () => {
+    const { readDrivConfigDefaults } = await import('../src/core/types.js');
+    fs.mkdirSync(path.join(tmpDir, '.driv'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, '.driv', 'config.yaml'),
+      [
+        'project: driv',
+        'defaults:',
+        '  build_mode: manual',
+        '  tdd_mode: no-tdd',
+        '  isolation: inline',
+        '  verify_mode: full',
+        '  context_compression: on',
+      ].join('\n') + '\n',
+      'utf-8',
+    );
+
+    const defaults = await readDrivConfigDefaults(tmpDir);
+
+    expect(defaults.buildMode).toBe('manual');
+    expect(defaults.tddMode).toBe('no-tdd');
+    expect(defaults.isolation).toBe('inline');
+    expect(defaults.verifyMode).toBe('full');
+    expect(defaults.contextCompression).toBe('on');
+  });
+
+  it('readDrivConfigDefaults 配置文件不存在时返回空对象', async () => {
+    const { readDrivConfigDefaults } = await import('../src/core/types.js');
+    const defaults = await readDrivConfigDefaults(tmpDir);
+    expect(defaults).toEqual({});
+  });
+
+  it('readDrivConfigDefaults 无 defaults 段时返回空对象', async () => {
+    const { readDrivConfigDefaults } = await import('../src/core/types.js');
+    fs.mkdirSync(path.join(tmpDir, '.driv'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, '.driv', 'config.yaml'),
+      'project: driv\nversion: 1\n',
+      'utf-8',
+    );
+    const defaults = await readDrivConfigDefaults(tmpDir);
+    expect(defaults).toEqual({});
+  });
+
+  it('applyConfigDefaults 用 config 覆盖 state 默认值', async () => {
+    const { applyConfigDefaults, createDefaultState } = await import('../src/core/types.js');
+    fs.mkdirSync(path.join(tmpDir, '.driv'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, '.driv', 'config.yaml'),
+      'defaults:\n  build_mode: manual\n  tdd_mode: no-tdd\n  verify_mode: full\n',
+      'utf-8',
+    );
+
+    const state = createDefaultState('test-change');
+    // 先改成与 config 不同的值
+    state.buildMode = 'subagent-driven-development';
+    state.tddMode = 'tdd';
+    state.verifyMode = 'light';
+
+    const result = await applyConfigDefaults(state, tmpDir);
+
+    expect(result.buildMode).toBe('manual');
+    expect(result.tddMode).toBe('no-tdd');
+    expect(result.verifyMode).toBe('full');
+    // 未在 config 中指定的字段保持原值
+    expect(result.isolation).toBe('branch');
+    expect(result.contextCompression).toBe('off');
+  });
+
+  it('applyConfigDefaults 无 config 时保持 state 不变', async () => {
+    const { applyConfigDefaults, createDefaultState } = await import('../src/core/types.js');
+    const state = createDefaultState('test-change');
+    const originalBuildMode = state.buildMode;
+    const result = await applyConfigDefaults(state, tmpDir);
+    expect(result.buildMode).toBe(originalBuildMode);
   });
 });

@@ -2,6 +2,7 @@ import { FileSystem } from '../utils/file-system.js';
 import { TemplateManager } from './template-manager.js';
 import { StateMachine } from './state-machine.js';
 import { PathResolver } from './path-resolver.js';
+import { CleanCodeChecker } from './clean-code-checker.js';
 export type ReviewType = 'requirement' | 'technical' | 'code';
 export type ReviewStatus = 'pending' | 'passed' | 'failed';
 export interface ReviewInfo {
@@ -25,7 +26,7 @@ export interface ChecklistResult {
 }
 export interface ReviewSystem {
     createReview(changeName: string, type: ReviewType): Promise<string>;
-    submitReview(changeName: string, type: ReviewType): Promise<void>;
+    submitReview(changeName: string, type: ReviewType, status: ReviewStatus): Promise<void>;
     checkStatus(changeName: string, type: ReviewType): Promise<ReviewStatus>;
     executeChecklist(changeName: string, type: ReviewType): Promise<ChecklistResult>;
     listReviews(changeName: string): Promise<ReviewInfo[]>;
@@ -35,13 +36,16 @@ export declare class ReviewSystemImpl implements ReviewSystem {
     private templateManager;
     private stateMachine;
     private pathResolver;
-    constructor(fs: FileSystem, templateManager: TemplateManager, stateMachine: StateMachine, pathResolver: PathResolver);
+    private cleanCodeChecker?;
+    private root;
+    constructor(fs: FileSystem, templateManager: TemplateManager, stateMachine: StateMachine, pathResolver: PathResolver, cleanCodeChecker?: CleanCodeChecker, root?: string);
     private reviewDir;
     private reviewFilePath;
     createReview(changeName: string, type: ReviewType): Promise<string>;
     executeChecklist(changeName: string, type: ReviewType): Promise<ChecklistResult>;
-    submitReview(changeName: string, type: ReviewType): Promise<void>;
+    submitReview(changeName: string, type: ReviewType, status: ReviewStatus): Promise<void>;
     checkStatus(changeName: string, type: ReviewType): Promise<ReviewStatus>;
     listReviews(changeName: string): Promise<ReviewInfo[]>;
+    private updateFrontmatter;
     private runAutoCheck;
 }

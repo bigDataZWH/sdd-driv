@@ -1,3 +1,5 @@
+import * as path from 'path';
+
 export const Phase = {
   Clarify: 'clarify',
   Design: 'design',
@@ -177,4 +179,39 @@ export function createDefaultState(changeName: string): ChangeState {
     archived: false,
     verifiedAt: null,
   };
+}
+
+/** 从 .driv/config.yaml 读取 defaults 段，用于覆盖 createDefaultState 的默认值 */
+export async function readDrivConfigDefaults(
+  root: string,
+): Promise<Partial<Pick<ChangeState, 'buildMode' | 'tddMode' | 'isolation' | 'verifyMode' | 'contextCompression'>>> {
+  const configPath = path.join(root, '.driv', 'config.yaml');
+  try {
+    const { readFile } = await import('fs/promises');
+    const content = await readFile(configPath, 'utf-8');
+    const { parse } = await import('yaml');
+    const config = parse(content) as Record<string, unknown>;
+    const defaults = config?.defaults as Record<string, unknown> | undefined;
+    if (!defaults) return {};
+    return {
+      buildMode: defaults.build_mode as string | undefined,
+      tddMode: defaults.tdd_mode as string | undefined,
+      isolation: defaults.isolation as string | undefined,
+      verifyMode: defaults.verify_mode as string | undefined,
+      contextCompression: defaults.context_compression as string | undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
+/** 用 .driv/config.yaml 的 defaults 段覆盖 ChangeState 中的默认值 */
+export async function applyConfigDefaults(state: ChangeState, root: string): Promise<ChangeState> {
+  const configDefaults = await readDrivConfigDefaults(root);
+  if (configDefaults.buildMode) state.buildMode = configDefaults.buildMode;
+  if (configDefaults.tddMode) state.tddMode = configDefaults.tddMode;
+  if (configDefaults.isolation) state.isolation = configDefaults.isolation;
+  if (configDefaults.verifyMode) state.verifyMode = configDefaults.verifyMode;
+  if (configDefaults.contextCompression) state.contextCompression = configDefaults.contextCompression;
+  return state;
 }

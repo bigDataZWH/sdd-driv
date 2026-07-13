@@ -20,6 +20,7 @@ export declare class ArchiveService {
     mergeDeltaSpec(changeName: string): Promise<boolean>;
     private markSuperpowersArtifacts;
     rollback(changeName: string): Promise<void>;
+    private restoreSpecBackups;
     private copyDirRecursive;
     private rollbackForDir;
     private updateIndex;

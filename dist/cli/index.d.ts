@@ -8,7 +8,7 @@ export interface StatusInput {
 }
 export declare function registerCommands(): string[];
 export declare function formatStatusOutput(input: StatusInput): string;
-export declare function doctorCheck(projectPath?: string): Promise<import('../commands/doctor.js').DoctorResult[]>;
+export declare function doctorCheck(projectPath?: any): Promise<import('../commands/doctor.js').DoctorResult[]>;
 export declare function createProgram(): Command;
-declare function main(argv?: string[]): Promise<void>;
+declare function main(argv?: any): Promise<void>;
 export { main };

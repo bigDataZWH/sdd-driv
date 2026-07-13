@@ -273,21 +273,12 @@ describe('ReviewSystem', () => {
 
   // ── submitReview (2.3) ──
 
-  it('submitReview 解析通过结论并更新状态', async () => {
+  it('submitReview 写入通过状态到 .driv.yaml', async () => {
     const { reviewSys, resolver } = await setup();
 
-    // Create a review file with passed conclusion
     await reviewSys.createReview('test-change', 'requirement');
-    const reviewPath = path.join(
-      resolver.changeDir('test-change'),
-      'reviews',
-      'requirement-review.md',
-    );
-    let content = fs.readFileSync(reviewPath, 'utf-8');
-    content = content.replace('- **状态**: pending', '- **状态**: passed');
-    fs.writeFileSync(reviewPath, content, 'utf-8');
 
-    await reviewSys.submitReview('test-change', 'requirement');
+    await reviewSys.submitReview('test-change', 'requirement', 'passed');
 
     const state = fs.readFileSync(resolver.stateFile('test-change'), 'utf-8');
     const { parse } = await import('yaml');
@@ -295,20 +286,12 @@ describe('ReviewSystem', () => {
     expect(parsed.hwProcess.requirementReview).toBe('passed');
   });
 
-  it('submitReview 解析失败结论并更新状态', async () => {
+  it('submitReview 写入失败状态到 .driv.yaml', async () => {
     const { reviewSys, resolver } = await setup();
 
     await reviewSys.createReview('test-change', 'technical');
-    const reviewPath = path.join(
-      resolver.changeDir('test-change'),
-      'reviews',
-      'technical-review.md',
-    );
-    let content = fs.readFileSync(reviewPath, 'utf-8');
-    content = content.replace('- **状态**: pending', '- **状态**: failed');
-    fs.writeFileSync(reviewPath, content, 'utf-8');
 
-    await reviewSys.submitReview('test-change', 'technical');
+    await reviewSys.submitReview('test-change', 'technical', 'failed');
 
     const state = fs.readFileSync(resolver.stateFile('test-change'), 'utf-8');
     const { parse } = await import('yaml');
@@ -316,17 +299,34 @@ describe('ReviewSystem', () => {
     expect(parsed.hwProcess.technicalReview).toBe('failed');
   });
 
-  it('submitReview 保持 pending 状态当结论未填写', async () => {
+  it('submitReview 写入 pending 状态到 .driv.yaml', async () => {
     const { reviewSys, resolver } = await setup();
 
     await reviewSys.createReview('test-change', 'code');
 
-    await reviewSys.submitReview('test-change', 'code');
+    await reviewSys.submitReview('test-change', 'code', 'pending');
 
     const state = fs.readFileSync(resolver.stateFile('test-change'), 'utf-8');
     const { parse } = await import('yaml');
     const parsed = parse(state);
     expect(parsed.hwProcess.codeReview).toBe('pending');
+  });
+
+  it('submitReview 更新 review markdown 的 frontmatter', async () => {
+    const { reviewSys, resolver } = await setup();
+
+    await reviewSys.createReview('test-change', 'requirement');
+    await reviewSys.submitReview('test-change', 'requirement', 'passed');
+
+    const reviewPath = path.join(
+      resolver.changeDir('test-change'),
+      'reviews',
+      'requirement-review.md',
+    );
+    const content = fs.readFileSync(reviewPath, 'utf-8');
+    expect(content.startsWith('---\n')).toBe(true);
+    expect(content).toContain('status: passed');
+    expect(content).toContain('submittedAt:');
   });
 
   // ── checkStatus (2.4) ──
@@ -388,6 +388,22 @@ describe('ReviewSystem', () => {
     const reviews = await reviewSys.listReviews('test-change');
 
     expect(reviews).toEqual([]);
+  });
+
+  it('listReviews 从 .driv.yaml 读取评审状态而非正则抠 Markdown', async () => {
+    const { reviewSys, sm } = await setup();
+
+    await reviewSys.createReview('test-change', 'requirement');
+    await reviewSys.createReview('test-change', 'code');
+
+    await sm.setField('test-change', 'hwProcess.requirementReview', 'passed');
+    await sm.setField('test-change', 'hwProcess.codeReview', 'failed');
+
+    const reviews = await reviewSys.listReviews('test-change');
+    const req = reviews.find((r) => r.type === 'requirement')!;
+    const code = reviews.find((r) => r.type === 'code')!;
+    expect(req.status).toBe('passed');
+    expect(code.status).toBe('failed');
   });
 
   // ── PhaseGuard 接线验证 (2.5) ──

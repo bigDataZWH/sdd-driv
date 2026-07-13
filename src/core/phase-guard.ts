@@ -1,6 +1,10 @@
 import { Phase, ChangeState } from './types.js';
 import { DirtyWorktreeChecker } from './dirty-worktree.js';
 import { HandoffManager } from './handoff-manager.js';
+import { FileSystem } from '../utils/file-system.js';
+import { SchemaRegistry } from './schema-registry.js';
+import { validateEARS } from './ears-validator.js';
+import * as path from 'path';
 
 export type ReviewType = 'requirement' | 'technical' | 'code';
 
@@ -58,7 +62,14 @@ export class PhaseGuardImpl implements PhaseGuard {
   constructor(
     private dirtyWorktree?: DirtyWorktreeChecker,
     private handoffManager?: HandoffManager,
+    private fs?: FileSystem,
+    private schemaRegistry?: SchemaRegistry,
   ) {}
+
+  private resolvePath(p: string): string {
+    if (!this.fs) return p;
+    return path.isAbsolute(p) ? p : path.join(this.fs.root, p);
+  }
 
   async checkEntry(phase: Phase, state: ChangeState): Promise<GuardResult> {
     switch (phase) {
@@ -275,7 +286,7 @@ export class PhaseGuardImpl implements PhaseGuard {
   async checkExit(phase: Phase, state: ChangeState): Promise<GuardResult> {
     switch (phase) {
       case 'clarify':
-        return this.checkClarifyExit(state);
+        return await this.checkClarifyExit(state);
       case 'design':
         return this.checkDesignExit(state);
       case 'build':
@@ -306,7 +317,7 @@ export class PhaseGuardImpl implements PhaseGuard {
     return guardResult;
   }
 
-  private checkClarifyExit(state: ChangeState): GuardResult {
+  private async checkClarifyExit(state: ChangeState): Promise<GuardResult> {
     const failures: GuardFailure[] = [];
 
     if (!state.openspec.proposal) {
@@ -367,6 +378,54 @@ export class PhaseGuardImpl implements PhaseGuard {
           '提案未完成，请先完成 clarify 阶段',
         ),
       );
+    }
+
+    // advisory: SchemaRegistry 校验 proposal（best-effort，不阻断）
+    if (this.fs && this.schemaRegistry && state.openspec.proposal) {
+      try {
+        const content = await this.fs.readFile(this.resolvePath(state.openspec.proposal));
+        const parsed = this.schemaRegistry.parseArtifact(content);
+        const result = this.schemaRegistry.validate('proposal', parsed);
+        if (!result.valid) {
+          failures.push(
+            fail(
+              'proposal-schema-valid',
+              'proposal 符合 schema',
+              'schema 校验失败',
+              'warning',
+              `proposal schema 校验失败: ${result.errors?.join('; ') ?? ''}`,
+            ),
+          );
+        }
+      } catch {
+        // best-effort，文件读取失败不阻断
+      }
+    }
+
+    // advisory: EARS 句式校验 specs（best-effort，不阻断）
+    if (this.fs && state.openspec.specs && state.openspec.specs.length > 0) {
+      for (const specsPath of state.openspec.specs) {
+        try {
+          const resolvedSpecsPath = this.resolvePath(specsPath);
+          if (await this.fs.exists(resolvedSpecsPath)) {
+            const specContent = await this.fs.readFile(resolvedSpecsPath);
+            const earsResult = validateEARS(specContent);
+            if (!earsResult.valid) {
+              failures.push(
+                fail(
+                  'ears-syntax',
+                  'spec 符合 EARS 句式',
+                  '存在不符合 EARS 的语句',
+                  'warning',
+                  `EARS 句式建议 (${specsPath}): ${earsResult.issues.join('; ')}`,
+                ),
+              );
+            }
+          }
+        } catch {
+          // best-effort
+        }
+      }
     }
 
     return buildResult('clarify', 'exit', failures);

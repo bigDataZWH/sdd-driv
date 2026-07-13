@@ -1,3 +1,4 @@
+import { parseDeltaSpec } from './delta-spec-parser.js';
 import * as path from 'path';
 import * as fs from 'fs';
 export class ArchiveService {
@@ -191,6 +192,34 @@ export class ArchiveService {
             const fullPath = path.join(archiveDir, dir);
             await fs.promises.rm(fullPath, { recursive: true, force: true });
         }
+        // 恢复 spec backup（mergeDeltaSpec 改写主 spec 时留下的 .backup）
+        await this.restoreSpecBackups(changeName);
+    }
+    async restoreSpecBackups(changeName) {
+        const specsDir = path.join(this.root, 'openspec', 'specs');
+        if (!(await this.fs.exists(specsDir)))
+            return;
+        let entries = [];
+        try {
+            entries = await this.fs.listDir(specsDir);
+        }
+        catch {
+            return;
+        }
+        for (const entry of entries) {
+            const specPath = path.join(specsDir, entry, 'spec.md');
+            const backupPath = specPath + '.backup';
+            if (await this.fs.exists(backupPath)) {
+                try {
+                    const backupContent = await this.fs.readFile(backupPath);
+                    await this.fs.writeFile(specPath, backupContent);
+                    await fs.promises.unlink(backupPath);
+                }
+                catch {
+                    // best-effort: 恢复失败不影响 rollback 整体
+                }
+            }
+        }
     }
     async copyDirRecursive(srcDir, destDir) {
         if (!(await this.fs.exists(srcDir)))
@@ -238,6 +267,15 @@ export class ArchiveService {
         await this.fs.writeFile(indexPath, content);
     }
     detectStrategy(content) {
+        // 优先用 DeltaSpecParser 解析
+        const delta = parseDeltaSpec(content);
+        if (delta.removed.length > 0)
+            return 'supersede';
+        if (delta.modified.length > 0)
+            return 'update';
+        if (delta.added.length > 0)
+            return 'append';
+        // 回退到旧的正则检测
         if (content.match(/<!--\s*driv-merge\s*:\s*supersede\s*-->/))
             return 'supersede';
         if (content.match(/<!--\s*driv-merge\s*:\s*update\s*-->/))
@@ -259,7 +297,8 @@ export class ArchiveService {
         for (const [name, deltaReq] of deltaReqs) {
             if (mainReqs.has(name)) {
                 const existingReq = mainReqs.get(name);
-                updated = updated.replace(existingReq, deltaReq);
+                // 使用 split/join 全局替换，避免 string.replace 只替换第一个匹配
+                updated = updated.split(existingReq).join(deltaReq);
             }
             else {
                 updated = updated.trimEnd() + '\n\n' + deltaReq;

@@ -46,9 +46,16 @@ export class BuildOrchestrator {
         };
     }
     recordPlan(plan) {
+        const startedAt = new Date().toISOString();
+        const results = plan.records.map((r) => ({
+            recordId: r.taskId,
+            status: 'pending',
+            output: '',
+            startedAt,
+        }));
         return {
             plan,
-            results: [],
+            results,
             verifications: [],
             successCount: 0,
             failCount: 0,

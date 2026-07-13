@@ -1,34 +1,6 @@
 import * as path from 'path';
 import * as fs from 'fs';
-const CHECKLIST_DEFS = {
-    requirement: [
-        { name: '需求描述清晰完整', description: '需求描述清晰完整', autoCheck: false },
-        { name: '验收标准明确', description: '验收标准明确', autoCheck: false },
-        { name: '范围边界清晰', description: '范围边界清晰', autoCheck: false },
-        { name: '风险识别充分', description: '风险识别充分', autoCheck: false },
-        { name: 'proposal 存在', description: 'proposal 文件已创建', autoCheck: true },
-        { name: 'tasks 存在', description: 'tasks 文件已创建', autoCheck: true },
-    ],
-    technical: [
-        { name: '技术方案可行性', description: '技术方案可行性', autoCheck: false },
-        { name: '架构设计合理性', description: '架构设计合理性', autoCheck: false },
-        { name: '接口设计完整性', description: '接口设计完整性', autoCheck: false },
-        { name: '性能考虑充分', description: '性能考虑充分', autoCheck: false },
-        { name: '安全考虑充分', description: '安全考虑充分', autoCheck: false },
-        { name: 'design 存在', description: '设计文档已创建', autoCheck: true },
-        { name: '设计结构完整', description: '设计文档包含完整章节', autoCheck: true },
-    ],
-    code: [
-        { name: '代码符合规范', description: '代码符合规范', autoCheck: false },
-        { name: '单元测试覆盖', description: '单元测试覆盖', autoCheck: false },
-        { name: '无安全漏洞', description: '无安全漏洞', autoCheck: false },
-        { name: '注释文档完整', description: '注释文档完整', autoCheck: false },
-        { name: '代码已提交', description: '代码已提交', autoCheck: true },
-        { name: '测试通过', description: '单元测试通过', autoCheck: true },
-        { name: 'Clean Code 通过', description: 'Clean Code 检查通过', autoCheck: true },
-        { name: '安全扫描通过', description: '安全扫描通过', autoCheck: true },
-    ],
-};
+import { CHECKLIST_DEFS } from './review-types.js';
 const STATUS_FIELD_MAP = {
     requirement: 'hwProcess.requirementReview',
     technical: 'hwProcess.technicalReview',
@@ -39,11 +11,15 @@ export class ReviewSystemImpl {
     templateManager;
     stateMachine;
     pathResolver;
-    constructor(fs, templateManager, stateMachine, pathResolver) {
+    cleanCodeChecker;
+    root;
+    constructor(fs, templateManager, stateMachine, pathResolver, cleanCodeChecker, root) {
         this.fs = fs;
         this.templateManager = templateManager;
         this.stateMachine = stateMachine;
         this.pathResolver = pathResolver;
+        this.cleanCodeChecker = cleanCodeChecker;
+        this.root = root ?? pathResolver.root;
     }
     reviewDir(changeName) {
         return path.join(this.pathResolver.changeDir(changeName), 'reviews');
@@ -102,12 +78,17 @@ export class ReviewSystemImpl {
             timestamp: new Date().toISOString(),
         };
     }
-    async submitReview(changeName, type) {
-        const filePath = this.reviewFilePath(changeName, type);
-        const content = await this.fs.readFile(filePath);
-        const statusMatch = content.match(/-\s*\*\*状态\*\*\s*:\s*(passed|failed|pending)/);
-        const status = (statusMatch?.[1] || 'pending');
+    async submitReview(changeName, type, status) {
         await this.stateMachine.setField(changeName, STATUS_FIELD_MAP[type], status);
+        const reviewPath = this.reviewFilePath(changeName, type);
+        if (await this.fs.exists(reviewPath)) {
+            const content = await this.fs.readFile(reviewPath);
+            const updated = this.updateFrontmatter(content, {
+                status,
+                submittedAt: new Date().toISOString(),
+            });
+            await this.fs.writeFile(reviewPath, updated);
+        }
     }
     async checkStatus(changeName, type) {
         const state = await this.stateMachine.getState(changeName);
@@ -115,42 +96,47 @@ export class ReviewSystemImpl {
         return state.hwProcess[key];
     }
     async listReviews(changeName) {
-        const dir = this.reviewDir(changeName);
-        let files;
-        try {
-            files = await this.fs.listDir(dir);
-        }
-        catch {
-            return [];
-        }
+        const state = await this.stateMachine.getState(changeName);
+        const types = ['requirement', 'technical', 'code'];
         const reviews = [];
-        for (const file of files) {
-            if (!file.endsWith('-review.md'))
-                continue;
-            const type = file.replace('-review.md', '');
-            if (!['requirement', 'technical', 'code'].includes(type))
-                continue;
-            const fullPath = path.join(dir, file);
-            let status = 'pending';
-            try {
-                const content = await this.fs.readFile(fullPath);
-                const statusMatch = content.match(/-\s*\*\*状态\*\*\s*:\s*(passed|failed|pending)/);
-                status = (statusMatch?.[1] || 'pending');
+        for (const type of types) {
+            const reviewPath = this.reviewFilePath(changeName, type);
+            if (await this.fs.exists(reviewPath)) {
+                const key = `${type}Review`;
+                const status = state.hwProcess[key] ?? 'pending';
+                let createdAt = '';
+                try {
+                    const stat = await fs.promises.stat(reviewPath);
+                    createdAt = stat.birthtime.toISOString();
+                }
+                catch {
+                    createdAt = new Date().toISOString();
+                }
+                reviews.push({ type, path: reviewPath, status, createdAt });
             }
-            catch {
-                // use default pending
-            }
-            let createdAt = '';
-            try {
-                const stat = await fs.promises.stat(fullPath);
-                createdAt = stat.birthtime.toISOString();
-            }
-            catch {
-                createdAt = new Date().toISOString();
-            }
-            reviews.push({ type, path: fullPath, status, createdAt });
         }
         return reviews;
+    }
+    updateFrontmatter(content, fields) {
+        const fmRegex = /^---\n([\s\S]*?)\n---\n/;
+        const match = content.match(fmRegex);
+        if (match) {
+            const fm = {};
+            for (const line of match[1].split('\n')) {
+                const m = line.match(/^(\w+):\s*(.*)$/);
+                if (m)
+                    fm[m[1]] = m[2];
+            }
+            Object.assign(fm, fields);
+            const newFm = Object.entries(fm)
+                .map(([k, v]) => `${k}: ${v}`)
+                .join('\n');
+            return `---\n${newFm}\n---\n` + content.slice(match[0].length);
+        }
+        const newFm = Object.entries(fields)
+            .map(([k, v]) => `${k}: ${v}`)
+            .join('\n');
+        return `---\n${newFm}\n---\n` + content;
     }
     async runAutoCheck(changeName, checkName) {
         const state = await this.stateMachine.getState(changeName);
@@ -200,34 +186,114 @@ export class ReviewSystemImpl {
                 return { passed: false, detail: 'design 路径未设置' };
             }
             case '代码已提交': {
-                const committed = state.phases.build.artifacts.committed;
-                return {
-                    passed: committed === 'true',
-                    detail: committed === 'true' ? '代码已提交' : '代码未提交',
-                };
+                try {
+                    const { execFile } = await import('child_process');
+                    const { promisify } = await import('util');
+                    const execFileAsync = promisify(execFile);
+                    const { stdout } = await execFileAsync('git', ['status', '--porcelain'], {
+                        cwd: this.root,
+                    });
+                    const isClean = stdout.trim().length === 0;
+                    return {
+                        passed: isClean,
+                        detail: isClean
+                            ? '工作区干净，代码已提交'
+                            : `工作区有未提交变更: ${stdout.trim().split('\n').length} 个文件`,
+                    };
+                }
+                catch (error) {
+                    const committed = state.phases.build.artifacts.committed;
+                    return {
+                        passed: committed === 'true',
+                        detail: `工具调用失败，回退到状态字段检查: ${committed === 'true' ? '代码已提交' : '代码未提交'}`,
+                    };
+                }
             }
             case '测试通过': {
-                const tests = state.phases.build.artifacts.tests;
-                return {
-                    passed: tests === 'passed',
-                    detail: tests === 'passed' ? '测试已通过' : `测试状态: ${tests || '未运行'}`,
-                };
+                try {
+                    const { execFile } = await import('child_process');
+                    const { promisify } = await import('util');
+                    const execFileAsync = promisify(execFile);
+                    await execFileAsync('npm', ['test'], { cwd: this.root });
+                    return { passed: true, detail: '测试已通过（实际运行 npm test）' };
+                }
+                catch (error) {
+                    const tests = state.phases.build.artifacts.tests;
+                    const errMsg = error?.stderr || error?.message || '';
+                    if (errMsg.includes('npm') && !errMsg.includes('FAIL')) {
+                        return {
+                            passed: tests === 'passed',
+                            detail: `工具调用失败，回退到状态字段检查: ${tests === 'passed' ? '测试已通过' : '测试未通过'}`,
+                        };
+                    }
+                    return { passed: false, detail: `测试失败: ${errMsg.slice(0, 200)}` };
+                }
             }
             case 'Clean Code 通过': {
-                const cleanCode = state.phases.build.artifacts['clean-code'];
-                return {
-                    passed: cleanCode === 'passed',
-                    detail: cleanCode === 'passed'
-                        ? 'Clean Code 已通过'
-                        : `Clean Code 状态: ${cleanCode || '未检查'}`,
-                };
+                try {
+                    const srcDir = path.join(this.root, 'src');
+                    const files = [];
+                    const walkDir = async (dir) => {
+                        const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+                        for (const entry of entries) {
+                            const fullPath = path.join(dir, entry.name);
+                            if (entry.isDirectory()) {
+                                await walkDir(fullPath);
+                            }
+                            else {
+                                files.push(fullPath);
+                            }
+                        }
+                    };
+                    await walkDir(srcDir);
+                    let allPassed = true;
+                    const failedFiles = [];
+                    for (const file of files) {
+                        if (file.endsWith('.ts')) {
+                            const content = await fs.promises.readFile(file, 'utf-8');
+                            const result = await this.cleanCodeChecker.check(content, file);
+                            if (!result.passed) {
+                                allPassed = false;
+                                failedFiles.push(path.basename(file));
+                            }
+                        }
+                    }
+                    return {
+                        passed: allPassed,
+                        detail: allPassed
+                            ? 'Clean Code 已通过（实际检查 src/）'
+                            : `Clean Code 失败: ${failedFiles.join(', ')}`,
+                    };
+                }
+                catch (error) {
+                    const cleanCode = state.phases.build.artifacts['clean-code'];
+                    return {
+                        passed: cleanCode === 'passed',
+                        detail: `工具调用失败，回退到状态字段检查: ${cleanCode === 'passed' ? 'Clean Code 已通过' : 'Clean Code 未通过'}`,
+                    };
+                }
             }
             case '安全扫描通过': {
-                const security = state.phases.build.artifacts['security-scan'];
-                return {
-                    passed: security === 'passed',
-                    detail: security === 'passed' ? '安全扫描已通过' : `安全扫描状态: ${security || '未执行'}`,
-                };
+                try {
+                    const { execFile } = await import('child_process');
+                    const { promisify } = await import('util');
+                    const execFileAsync = promisify(execFile);
+                    await execFileAsync('npm', ['audit', '--audit-level=high'], {
+                        cwd: this.root,
+                    });
+                    return { passed: true, detail: '安全扫描已通过（实际运行 npm audit）' };
+                }
+                catch (error) {
+                    const security = state.phases.build.artifacts['security-scan'];
+                    const errMsg = error?.stderr || error?.message || '';
+                    if (errMsg.includes('npm') && !errMsg.includes('vulnerability')) {
+                        return {
+                            passed: security === 'passed',
+                            detail: `工具调用失败，回退到状态字段检查: ${security === 'passed' ? '安全扫描已通过' : '安全扫描未通过'}`,
+                        };
+                    }
+                    return { passed: false, detail: `安全扫描发现高危漏洞: ${errMsg.slice(0, 200)}` };
+                }
             }
             default:
                 return { passed: false, detail: `未知自动检查项: ${checkName}` };

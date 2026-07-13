@@ -8,6 +8,8 @@ export interface DirtyWorktreeResult {
     changes: WorktreeChange[];
 }
 export declare class DirtyWorktreeChecker {
-    check(_changeName: string): Promise<DirtyWorktreeResult>;
-    classifyPaths(_paths: string[], _changeName: string): WorktreeChange[];
+    private projectPath?;
+    constructor(projectPath?: string | undefined);
+    check(changeName: string): Promise<DirtyWorktreeResult>;
+    classifyPaths(paths: string[], changeName: string): WorktreeChange[];
 }

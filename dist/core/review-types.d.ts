@@ -37,5 +37,11 @@ export interface GateConfig {
     template: string;
 }
 export type GatesConfig = Record<string, GateConfig>;
+export interface ChecklistDef {
+    name: string;
+    description: string;
+    autoCheck: boolean;
+}
+export declare const CHECKLIST_DEFS: Record<ReviewType, ChecklistDef[]>;
 export declare const defaultGatesConfig: GatesConfig;
 export declare function loadGatesConfig(fs: FileSystem, root: string): Promise<GatesConfig>;

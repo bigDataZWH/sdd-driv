@@ -5,6 +5,7 @@ import { TemplateManager } from './template-manager.js';
 import { StateMachine } from './state-machine.js';
 import { PathResolver } from './path-resolver.js';
 import { CleanCodeChecker } from './clean-code-checker.js';
+import { CHECKLIST_DEFS } from './review-types.js';
 
 export type ReviewType = 'requirement' | 'technical' | 'code';
 export type ReviewStatus = 'pending' | 'passed' | 'failed';
@@ -33,47 +34,11 @@ export interface ChecklistResult {
 
 export interface ReviewSystem {
   createReview(changeName: string, type: ReviewType): Promise<string>;
-  submitReview(changeName: string, type: ReviewType): Promise<void>;
+  submitReview(changeName: string, type: ReviewType, status: ReviewStatus): Promise<void>;
   checkStatus(changeName: string, type: ReviewType): Promise<ReviewStatus>;
   executeChecklist(changeName: string, type: ReviewType): Promise<ChecklistResult>;
   listReviews(changeName: string): Promise<ReviewInfo[]>;
 }
-
-interface ChecklistDef {
-  name: string;
-  description: string;
-  autoCheck: boolean;
-}
-
-const CHECKLIST_DEFS: Record<ReviewType, ChecklistDef[]> = {
-  requirement: [
-    { name: '需求描述清晰完整', description: '需求描述清晰完整', autoCheck: false },
-    { name: '验收标准明确', description: '验收标准明确', autoCheck: false },
-    { name: '范围边界清晰', description: '范围边界清晰', autoCheck: false },
-    { name: '风险识别充分', description: '风险识别充分', autoCheck: false },
-    { name: 'proposal 存在', description: 'proposal 文件已创建', autoCheck: true },
-    { name: 'tasks 存在', description: 'tasks 文件已创建', autoCheck: true },
-  ],
-  technical: [
-    { name: '技术方案可行性', description: '技术方案可行性', autoCheck: false },
-    { name: '架构设计合理性', description: '架构设计合理性', autoCheck: false },
-    { name: '接口设计完整性', description: '接口设计完整性', autoCheck: false },
-    { name: '性能考虑充分', description: '性能考虑充分', autoCheck: false },
-    { name: '安全考虑充分', description: '安全考虑充分', autoCheck: false },
-    { name: 'design 存在', description: '设计文档已创建', autoCheck: true },
-    { name: '设计结构完整', description: '设计文档包含完整章节', autoCheck: true },
-  ],
-  code: [
-    { name: '代码符合规范', description: '代码符合规范', autoCheck: false },
-    { name: '单元测试覆盖', description: '单元测试覆盖', autoCheck: false },
-    { name: '无安全漏洞', description: '无安全漏洞', autoCheck: false },
-    { name: '注释文档完整', description: '注释文档完整', autoCheck: false },
-    { name: '代码已提交', description: '代码已提交', autoCheck: true },
-    { name: '测试通过', description: '单元测试通过', autoCheck: true },
-    { name: 'Clean Code 通过', description: 'Clean Code 检查通过', autoCheck: true },
-    { name: '安全扫描通过', description: '安全扫描通过', autoCheck: true },
-  ],
-};
 
 const STATUS_FIELD_MAP: Record<ReviewType, string> = {
   requirement: 'hwProcess.requirementReview',
@@ -172,14 +137,18 @@ export class ReviewSystemImpl implements ReviewSystem {
     };
   }
 
-  async submitReview(changeName: string, type: ReviewType): Promise<void> {
-    const filePath = this.reviewFilePath(changeName, type);
-    const content = await this.fs.readFile(filePath);
-
-    const statusMatch = content.match(/-\s*\*\*状态\*\*\s*:\s*(passed|failed|pending)/);
-    const status = (statusMatch?.[1] || 'pending') as ReviewStatus;
-
+  async submitReview(changeName: string, type: ReviewType, status: ReviewStatus): Promise<void> {
     await this.stateMachine.setField(changeName, STATUS_FIELD_MAP[type], status);
+
+    const reviewPath = this.reviewFilePath(changeName, type);
+    if (await this.fs.exists(reviewPath)) {
+      const content = await this.fs.readFile(reviewPath);
+      const updated = this.updateFrontmatter(content, {
+        status,
+        submittedAt: new Date().toISOString(),
+      });
+      await this.fs.writeFile(reviewPath, updated);
+    }
   }
 
   async checkStatus(changeName: string, type: ReviewType): Promise<ReviewStatus> {
@@ -189,42 +158,50 @@ export class ReviewSystemImpl implements ReviewSystem {
   }
 
   async listReviews(changeName: string): Promise<ReviewInfo[]> {
-    const dir = this.reviewDir(changeName);
-    let files: string[];
-    try {
-      files = await this.fs.listDir(dir);
-    } catch {
-      return [];
-    }
-
+    const state = await this.stateMachine.getState(changeName);
+    const types: ReviewType[] = ['requirement', 'technical', 'code'];
     const reviews: ReviewInfo[] = [];
-    for (const file of files) {
-      if (!file.endsWith('-review.md')) continue;
-      const type = file.replace('-review.md', '') as ReviewType;
-      if (!['requirement', 'technical', 'code'].includes(type)) continue;
 
-      const fullPath = path.join(dir, file);
-      let status: ReviewStatus = 'pending';
-      try {
-        const content = await this.fs.readFile(fullPath);
-        const statusMatch = content.match(/-\s*\*\*状态\*\*\s*:\s*(passed|failed|pending)/);
-        status = (statusMatch?.[1] || 'pending') as ReviewStatus;
-      } catch {
-        // use default pending
+    for (const type of types) {
+      const reviewPath = this.reviewFilePath(changeName, type);
+      if (await this.fs.exists(reviewPath)) {
+        const key = `${type}Review` as keyof typeof state.hwProcess;
+        const status = (state.hwProcess[key] as ReviewStatus) ?? 'pending';
+
+        let createdAt = '';
+        try {
+          const stat = await fs.promises.stat(reviewPath);
+          createdAt = stat.birthtime.toISOString();
+        } catch {
+          createdAt = new Date().toISOString();
+        }
+
+        reviews.push({ type, path: reviewPath, status, createdAt });
       }
-
-      let createdAt = '';
-      try {
-        const stat = await fs.promises.stat(fullPath);
-        createdAt = stat.birthtime.toISOString();
-      } catch {
-        createdAt = new Date().toISOString();
-      }
-
-      reviews.push({ type, path: fullPath, status, createdAt });
     }
 
     return reviews;
+  }
+
+  private updateFrontmatter(content: string, fields: Record<string, string>): string {
+    const fmRegex = /^---\n([\s\S]*?)\n---\n/;
+    const match = content.match(fmRegex);
+    if (match) {
+      const fm: Record<string, string> = {};
+      for (const line of match[1].split('\n')) {
+        const m = line.match(/^(\w+):\s*(.*)$/);
+        if (m) fm[m[1]] = m[2];
+      }
+      Object.assign(fm, fields);
+      const newFm = Object.entries(fm)
+        .map(([k, v]) => `${k}: ${v}`)
+        .join('\n');
+      return `---\n${newFm}\n---\n` + content.slice(match[0].length);
+    }
+    const newFm = Object.entries(fields)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join('\n');
+    return `---\n${newFm}\n---\n` + content;
   }
 
   private async runAutoCheck(
@@ -307,7 +284,7 @@ export class ReviewSystemImpl implements ReviewSystem {
           const { execFile } = await import('child_process');
           const { promisify } = await import('util');
           const execFileAsync = promisify(execFile);
-          await execFileAsync('npm', ['test'], { cwd: this.root, shell: true });
+          await execFileAsync('npm', ['test'], { cwd: this.root });
           return { passed: true, detail: '测试已通过（实际运行 npm test）' };
         } catch (error) {
           const tests = state.phases.build.artifacts.tests;
@@ -374,7 +351,6 @@ export class ReviewSystemImpl implements ReviewSystem {
           const execFileAsync = promisify(execFile);
           await execFileAsync('npm', ['audit', '--audit-level=high'], {
             cwd: this.root,
-            shell: true,
           });
           return { passed: true, detail: '安全扫描已通过（实际运行 npm audit）' };
         } catch (error) {

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -399,6 +399,246 @@ describe('TemplateManager', () => {
         const tm = new TemplateManager(f, isolated);
         const content = await tm.selectTemplate('proposal');
         expect(content).toContain('# 默认');
+      } finally {
+        await fs.promises.rm(isolated, { recursive: true, force: true });
+      }
+    });
+  });
+
+  // ── P2-3: deepMerge 数组合并去重 ──
+  describe('deepMerge 数组合并', () => {
+    it('覆盖配置中的数组与默认数组合并而非替换', async () => {
+      const isolated = path.join(os.tmpdir(), 'driv-tmpl-merge-' + Date.now());
+      try {
+        await fs.promises.mkdir(path.join(isolated, '.driv', 'templates', 'proposals'), {
+          recursive: true,
+        });
+        await fs.promises.writeFile(
+          path.join(isolated, '.driv', 'templates', 'proposals', 'default.md'),
+          '# 默认\n\n{{x}}',
+        );
+        // 覆盖 placeholders.system 数组（仅写一个自定义项）
+        await fs.promises.writeFile(
+          path.join(isolated, '.driv', 'templates', 'config.yaml'),
+          [
+            'version: "1"',
+            'proposals:',
+            '  default: default',
+            '  types: {}',
+            'designs:',
+            '  default: default',
+            '  types: {}',
+            'specs:',
+            '  default: default',
+            '  types: {}',
+            'reviews: {}',
+            'inheritance:',
+            '  rules: []',
+            'placeholders:',
+            '  system:',
+            '    - custom_field',
+            '  user: []',
+            'project_override:',
+            '  search_paths:',
+            '    - .driv/templates/custom',
+          ].join('\n'),
+        );
+        const { FileSystem } = await import('../src/utils/file-system.js');
+        const { TemplateManager } = await import('../src/core/template-manager.js');
+        const f = new FileSystem(isolated);
+        const tm = new TemplateManager(f, isolated);
+        const config = await tm.getConfig();
+        // 默认 system 占位符 ['name','date','version'] 与覆盖 ['custom_field'] 应合并去重
+        expect(config.placeholders.system).toContain('name');
+        expect(config.placeholders.system).toContain('date');
+        expect(config.placeholders.system).toContain('version');
+        expect(config.placeholders.system).toContain('custom_field');
+      } finally {
+        await fs.promises.rm(isolated, { recursive: true, force: true });
+      }
+    });
+
+    it('重复数组元素被去重', async () => {
+      const isolated = path.join(os.tmpdir(), 'driv-tmpl-dedup-' + Date.now());
+      try {
+        await fs.promises.mkdir(path.join(isolated, '.driv', 'templates', 'proposals'), {
+          recursive: true,
+        });
+        await fs.promises.writeFile(
+          path.join(isolated, '.driv', 'templates', 'proposals', 'default.md'),
+          '# 默认\n\n{{x}}',
+        );
+        // 覆盖 system 数组中包含与默认重复的 'name'
+        await fs.promises.writeFile(
+          path.join(isolated, '.driv', 'templates', 'config.yaml'),
+          [
+            'version: "1"',
+            'proposals:',
+            '  default: default',
+            '  types: {}',
+            'designs:',
+            '  default: default',
+            '  types: {}',
+            'specs:',
+            '  default: default',
+            '  types: {}',
+            'reviews: {}',
+            'inheritance:',
+            '  rules: []',
+            'placeholders:',
+            '  system:',
+            '    - name',
+            '    - extra',
+            '  user: []',
+            'project_override:',
+            '  search_paths:',
+            '    - .driv/templates/custom',
+          ].join('\n'),
+        );
+        const { FileSystem } = await import('../src/utils/file-system.js');
+        const { TemplateManager } = await import('../src/core/template-manager.js');
+        const f = new FileSystem(isolated);
+        const tm = new TemplateManager(f, isolated);
+        const config = await tm.getConfig();
+        const names = config.placeholders.system.filter((p) => p === 'name');
+        expect(names).toHaveLength(1);
+        expect(config.placeholders.system).toContain('extra');
+      } finally {
+        await fs.promises.rm(isolated, { recursive: true, force: true });
+      }
+    });
+  });
+
+  // ── P3-4: frontmatter 标准化 ──
+  describe('frontmatter 标准化', () => {
+    it('loadTemplate 解析并缓存 frontmatter', async () => {
+      await fs.promises.writeFile(
+        path.join(TMPL_DIR, 'proposals', 'fm-cached.md'),
+        '---\ntemplate: fm-cached\nversion: 1.0\nplaceholders_required:\n  - change_name\n---\n\n# 测试\n\n{{change_name}}\n',
+      );
+      const fsInstance = new FileSystemClass(TMP_DIR);
+      const tm = new TemplateManagerClass(fsInstance, TMP_DIR);
+      await tm.loadTemplate('proposal', 'fm-cached');
+      const fm = tm.getTemplateFrontmatter('proposal', 'fm-cached');
+      expect(fm).not.toBeNull();
+      expect(fm?.template).toBe('fm-cached');
+      expect(fm?.version).toBe(1.0);
+      expect(fm?.placeholders_required).toEqual(['change_name']);
+    });
+
+    it('无 frontmatter 的模板 getTemplateFrontmatter 返回 null', async () => {
+      const fsInstance = new FileSystemClass(TMP_DIR);
+      const tm = new TemplateManagerClass(fsInstance, TMP_DIR);
+      await tm.loadTemplate('proposal', 'default');
+      expect(tm.getTemplateFrontmatter('proposal', 'default')).toBeNull();
+    });
+
+    it('缺少 frontmatter 中声明的必填占位符时报告警告', async () => {
+      await fs.promises.writeFile(
+        path.join(TMPL_DIR, 'proposals', 'fm-missing.md'),
+        '---\ntemplate: fm-missing\nplaceholders_required:\n  - change_name\n  - missing_one\n---\n\n# 测试\n\n{{change_name}}\n',
+      );
+      const fsInstance = new FileSystemClass(TMP_DIR);
+      const tm = new TemplateManagerClass(fsInstance, TMP_DIR);
+      const result = await tm.validateTemplate('proposal', 'fm-missing');
+      const warn = result.warnings.find((w) => /缺少必填占位符/.test(w));
+      expect(warn).toBeDefined();
+      expect(warn).toContain('missing_one');
+      expect(warn).not.toContain('change_name');
+    });
+
+    it('frontmatter 必填占位符全部存在时不报告该警告', async () => {
+      await fs.promises.writeFile(
+        path.join(TMPL_DIR, 'proposals', 'fm-ok.md'),
+        '---\ntemplate: fm-ok\nplaceholders_required:\n  - change_name\n---\n\n# 测试\n\n{{change_name}}\n',
+      );
+      const fsInstance = new FileSystemClass(TMP_DIR);
+      const tm = new TemplateManagerClass(fsInstance, TMP_DIR);
+      const result = await tm.validateTemplate('proposal', 'fm-ok');
+      expect(result.warnings.some((w) => /缺少必填占位符/.test(w))).toBe(false);
+    });
+
+    it('applyTemplate 父模板加载失败时输出 warn 日志', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        // 配置中已有继承规则 child: feature -> parent: default
+        // 删除 default.md 模拟父模板加载失败
+        await fs.promises.rm(path.join(TMPL_DIR, 'proposals', 'default.md'));
+        const fsInstance = new FileSystemClass(TMP_DIR);
+        const tm = new TemplateManagerClass(fsInstance, TMP_DIR);
+        // feature 模板仍存在，应回退使用子模板
+        const result = await tm.applyTemplate('proposal', 'feature', { description: 'x' });
+        expect(result).toContain('# 功能提案');
+        expect(warnSpy).toHaveBeenCalled();
+        const warnMsg = warnSpy.mock.calls.map((c) => String(c[0])).join('\n');
+        expect(warnMsg).toContain('default');
+      } finally {
+        warnSpy.mockRestore();
+        // 恢复 default.md
+        await fs.promises.writeFile(
+          path.join(TMPL_DIR, 'proposals', 'default.md'),
+          '# 默认提案\n\n## 概述\n\n{{description}}\n\n## 背景\n\n{{background:无}}',
+        );
+      }
+    });
+
+    it('getInheritanceChain 循环引用时输出 warn 日志', async () => {
+      const isolated = path.join(os.tmpdir(), 'driv-tmpl-cycle-' + Date.now());
+      try {
+        await fs.promises.mkdir(path.join(isolated, '.driv', 'templates', 'proposals'), {
+          recursive: true,
+        });
+        await fs.promises.writeFile(
+          path.join(isolated, '.driv', 'templates', 'proposals', 'default.md'),
+          '# 默认\n\n{{x}}',
+        );
+        // 构造循环引用: a -> b -> a
+        await fs.promises.writeFile(
+          path.join(isolated, '.driv', 'templates', 'config.yaml'),
+          [
+            'version: "1"',
+            'proposals:',
+            '  default: default',
+            '  types: {}',
+            'designs:',
+            '  default: default',
+            '  types: {}',
+            'specs:',
+            '  default: default',
+            '  types: {}',
+            'reviews: {}',
+            'inheritance:',
+            '  rules:',
+            '    - child: a',
+            '      parent: b',
+            '      strategy: extend',
+            '      sections: {}',
+            '    - child: b',
+            '      parent: a',
+            '      strategy: extend',
+            '      sections: {}',
+            'placeholders:',
+            '  system: []',
+            '  user: []',
+            'project_override:',
+            '  search_paths:',
+            '    - .driv/templates/custom',
+          ].join('\n'),
+        );
+        const { FileSystem } = await import('../src/utils/file-system.js');
+        const { TemplateManager } = await import('../src/core/template-manager.js');
+        const f = new FileSystem(isolated);
+        const tm = new TemplateManager(f, isolated);
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+          const chain = await tm.getInheritanceChain('proposal', 'a');
+          expect(chain).toEqual(['a']);
+          expect(warnSpy).toHaveBeenCalled();
+          const warnMsg = warnSpy.mock.calls.map((c) => String(c[0])).join('\n');
+          expect(warnMsg).toContain('继承链解析失败');
+        } finally {
+          warnSpy.mockRestore();
+        }
       } finally {
         await fs.promises.rm(isolated, { recursive: true, force: true });
       }

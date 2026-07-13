@@ -97,6 +97,55 @@ export class VerifyService {
         const { testCmd } = await this.readConfig(changeName);
         return this.runCommand(testCmd);
     }
+    async readCoverage() {
+        try {
+            const coveragePath = path.join(this.root, 'coverage', 'coverage-summary.json');
+            const content = await fs.promises.readFile(coveragePath, 'utf-8');
+            const data = JSON.parse(content);
+            // coverage-summary.json 格式：{ total: { lines: { pct: 80 }, functions: { pct: 82 }, branches: { pct: 70 }, statements: { pct: 80 } } }
+            const total = data.total;
+            if (!total)
+                return { passed: true };
+            const summary = {
+                lines: total.lines?.pct ?? 0,
+                functions: total.functions?.pct ?? 0,
+                branches: total.branches?.pct ?? 0,
+                statements: total.statements?.pct ?? 0,
+            };
+            const passed = summary.lines >= 80 &&
+                summary.functions >= 80 &&
+                summary.branches >= 70 &&
+                summary.statements >= 80;
+            return { passed, summary };
+        }
+        catch {
+            // coverage 文件不存在，向后兼容
+            return { passed: true };
+        }
+    }
+    async executeLint() {
+        const packageJsonPath = path.join(this.root, 'package.json');
+        if (!(await this.fs.exists(packageJsonPath))) {
+            return true; // 无 package.json，非 TS/Node 项目，跳过
+        }
+        try {
+            const pkg = await this.fs.readJson(packageJsonPath);
+            if (!pkg.scripts?.lint) {
+                return true; // 无 lint script，向后兼容
+            }
+            return this.runCommand('npm run lint');
+        }
+        catch {
+            return true; // 读取失败，向后兼容
+        }
+    }
+    async executeTypeCheck() {
+        const tsconfigPath = path.join(this.root, 'tsconfig.json');
+        if (!(await this.fs.exists(tsconfigPath))) {
+            return true; // 无 tsconfig.json，非 TS 项目，跳过
+        }
+        return this.runCommand('npx tsc --noEmit');
+    }
     parseCommand(cmd) {
         const parts = [];
         let current = '';
@@ -154,10 +203,21 @@ export class VerifyService {
         catch {
             cleanCodePassed = true;
         }
+        // 覆盖率收集（light 模式跳过 coverage 检查）
+        const coverageSkipped = scale === 'light';
+        const coverage = coverageSkipped ? { passed: true } : await this.readCoverage();
+        // lint + typecheck（新增）
+        const lintPassed = await this.executeLint();
+        const typeCheckPassed = await this.executeTypeCheck();
         await this.writeCleanCodeArtifacts(changeName, cleanCodePassed, cleanCodeIssues);
         const branchHandled = false;
-        const passed = buildPassed && testsPassed && cleanCodePassed;
-        const reportPath = await this.generateReport(changeName, {
+        const passed = buildPassed &&
+            testsPassed &&
+            cleanCodePassed &&
+            coverage.passed &&
+            lintPassed &&
+            typeCheckPassed;
+        const result = {
             scale,
             buildPassed,
             testsPassed,
@@ -165,21 +225,23 @@ export class VerifyService {
             branchHandled,
             reportPath: '',
             passed,
-        });
-        const result = {
-            scale,
-            buildPassed,
-            testsPassed,
-            cleanCodePassed,
-            branchHandled,
-            reportPath,
-            passed,
+            coveragePassed: coverage.passed,
+            coverageSkipped,
+            coverageSummary: coverage.summary,
+            lintPassed,
+            typeCheckPassed,
         };
+        let debugGateResult;
+        if (!passed) {
+            debugGateResult = this.debugGate.enforce('verify', passed);
+            // 将 debugGate 信息写入验证结果
+            result.debugGateEnforced = debugGateResult.enforced;
+            result.investigateGuidance = debugGateResult.investigateGuidance;
+        }
+        const reportPath = await this.generateReport(changeName, result);
+        result.reportPath = reportPath;
         await this.stateMachine.setField(changeName, 'verifyResult', passed ? 'pass' : 'fail');
         await this.stateMachine.setField(changeName, 'phases.verify.status', passed ? 'completed' : 'failed');
-        if (!passed) {
-            this.debugGate.enforce('verify', passed);
-        }
         return result;
     }
     async generateReport(changeName, result) {
@@ -200,11 +262,26 @@ export class VerifyService {
         lines.push(`| 构建 | ${result.buildPassed ? '✅ 通过' : '❌ 失败'} |`);
         lines.push(`| 测试 | ${result.testsPassed ? '✅ 通过' : '❌ 失败'} |`);
         lines.push(`| Clean Code | ${result.cleanCodePassed ? '✅ 通过' : '❌ 失败'} |`);
+        const coverageStatus = result.coverageSkipped
+            ? '⏭️ 跳过'
+            : result.coveragePassed
+                ? '✅ 通过'
+                : '❌ 未达标';
+        lines.push(`| 测试覆盖率 | ${coverageStatus} ${result.coverageSummary ? `(${result.coverageSummary.lines}% lines)` : ''} |`);
+        lines.push(`| Lint 检查 | ${result.lintPassed ? '✅ 通过' : '❌ 失败'} |`);
+        lines.push(`| 类型检查 | ${result.typeCheckPassed ? '✅ 通过' : '❌ 失败'} |`);
         lines.push(`| 分支处理 | ${result.branchHandled ? '✅ 已处理' : '⚠️ 未处理'} |`);
         lines.push('');
         lines.push('## 结论');
         lines.push('');
         lines.push(result.passed ? '✅ **验证通过**' : '❌ **验证未通过**');
+        if (result.debugGateEnforced && result.investigateGuidance) {
+            lines.push('');
+            lines.push('## DebugGate 侧路径（investigate 指引）');
+            lines.push('');
+            lines.push(`- **enforced**: true`);
+            lines.push(`- **指引**: ${result.investigateGuidance}`);
+        }
         await this.fs.writeFile(reportPath, lines.join('\n'));
         return reportPath;
     }

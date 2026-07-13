@@ -377,7 +377,12 @@ describe('VerifyService', () => {
     async function setupPassingChange(changeName: string): Promise<string> {
       const changeDir = path.join(tmpDir, 'openspec', 'changes', changeName);
       fs.mkdirSync(changeDir, { recursive: true });
-      fs.writeFileSync(path.join(changeDir, 'tasks.md'), '- [ ] Task 1\n', 'utf-8');
+      // 使用 3 个任务让 assessScale 返回 'full'，使覆盖率检查生效
+      fs.writeFileSync(
+        path.join(changeDir, 'tasks.md'),
+        '- [ ] Task 1\n- [ ] Task 2\n- [ ] Task 3\n',
+        'utf-8',
+      );
       const configDir = path.join(changeDir, '.driv');
       fs.mkdirSync(configDir, { recursive: true });
       fs.writeFileSync(
@@ -449,6 +454,41 @@ describe('VerifyService', () => {
 
         expect(result.coveragePassed).toBe(true);
         expect(result.coverageSummary).toBeUndefined();
+      });
+
+      it('light 模式跳过 coverage 检查（即使 coverage 不达标也通过）', async () => {
+        // light scale: 单任务
+        const changeName = 'cov-light-skip';
+        const changeDir = path.join(tmpDir, 'openspec', 'changes', changeName);
+        fs.mkdirSync(changeDir, { recursive: true });
+        fs.writeFileSync(path.join(changeDir, 'tasks.md'), '- [ ] Task 1\n', 'utf-8');
+        const configDir = path.join(changeDir, '.driv');
+        fs.mkdirSync(configDir, { recursive: true });
+        fs.writeFileSync(
+          path.join(configDir, 'config.yaml'),
+          'buildCmd: node -e process.exit(0)\ntestCmd: node -e process.exit(0)\n',
+          'utf-8',
+        );
+        await stateMachine.initChange(changeName);
+
+        // 写入不达标的 coverage（在 full 模式下会导致 coveragePassed=false）
+        writeCoverage({
+          total: {
+            lines: { pct: 50 },
+            functions: { pct: 50 },
+            branches: { pct: 50 },
+            statements: { pct: 50 },
+          },
+        });
+
+        const result = await verifyService.verify(changeName);
+
+        expect(result.scale).toBe('light');
+        expect(result.coverageSkipped).toBe(true);
+        // 跳过后 coveragePassed 视为通过
+        expect(result.coveragePassed).toBe(true);
+        // 其他检查均通过，整体 passed=true
+        expect(result.passed).toBe(true);
       });
     });
 

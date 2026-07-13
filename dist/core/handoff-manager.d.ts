@@ -13,6 +13,8 @@ export interface CompressedContext {
     constraints: string[];
     tasks: string[];
     reviews: string[];
+    intent: string;
+    acceptanceCriteria: string[];
 }
 export interface VerificationInfo {
     totalHash: string;
@@ -43,8 +45,13 @@ export declare class HandoffManager {
     collectSourceFiles(changeName: string): Promise<SourceFile[]>;
     generate(changeName: string, phase: Phase, compression?: string): Promise<HandoffPackage>;
     validate(changeName: string, _phase: Phase): Promise<boolean>;
+    getMismatchedFiles(changeName: string): Promise<string[]>;
+    getHandoffPackage(changeName: string): Promise<HandoffPackage | null>;
+    readChangeFile(changeName: string, fileName: string): Promise<string | null>;
     private hashAndSummarize;
     private buildContext;
+    private extractIntent;
+    private extractAcceptanceCriteria;
     private writeHandoffFiles;
     private generateMarkdown;
 }

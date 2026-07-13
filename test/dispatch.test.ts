@@ -158,6 +158,25 @@ describe('BuildOrchestrator', () => {
     expect(report.failCount).toBe(0);
     expect(report.allModifiedFiles).toEqual([]);
   });
+
+  it('recordPlan 从 plan.records 提取基础记录填充 results', async () => {
+    const { BuildOrchestrator } = await import('../src/core/dispatch.js');
+    const orch = new BuildOrchestrator('test-change', ['src/core/dispatch.ts']);
+    const plan = orch.generateDispatchPlan();
+    const report = orch.recordPlan(plan);
+    // results 非空，且与 plan.records 数量一致
+    expect(report.results.length).toBeGreaterThan(0);
+    expect(report.results).toHaveLength(plan.records.length);
+    // 每条记录都是 pending 状态并携带 recordId
+    for (const r of report.results) {
+      expect(r.status).toBe('pending');
+      expect(r.startedAt).toBeTruthy();
+    }
+    const recordIds = report.results.map((r) => r.recordId);
+    expect(recordIds).toContain('build-tsc');
+    expect(recordIds).toContain('build-assets');
+    expect(recordIds).toContain('test-build');
+  });
 });
 
 describe('ArchiveReportService', () => {

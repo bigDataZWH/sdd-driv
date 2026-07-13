@@ -19,6 +19,7 @@ export interface VerifyResult {
   debugGateEnforced?: boolean;
   investigateGuidance?: string;
   coveragePassed?: boolean;
+  coverageSkipped?: boolean;
   coverageSummary?: {
     lines: number;
     functions: number;
@@ -173,10 +174,12 @@ export class VerifyService {
   }
 
   async executeLint(): Promise<boolean> {
+    const packageJsonPath = path.join(this.root, 'package.json');
+    if (!(await this.fs.exists(packageJsonPath))) {
+      return true; // 无 package.json，非 TS/Node 项目，跳过
+    }
     try {
-      const packageJsonPath = path.join(this.root, 'package.json');
-      const content = await fs.promises.readFile(packageJsonPath, 'utf-8');
-      const pkg = JSON.parse(content);
+      const pkg = await this.fs.readJson<{ scripts?: { lint?: string } }>(packageJsonPath);
       if (!pkg.scripts?.lint) {
         return true; // 无 lint script，向后兼容
       }
@@ -187,13 +190,11 @@ export class VerifyService {
   }
 
   async executeTypeCheck(): Promise<boolean> {
-    try {
-      const tsconfigPath = path.join(this.root, 'tsconfig.json');
-      await fs.promises.access(tsconfigPath);
-      return this.runCommand('npx tsc --noEmit');
-    } catch {
-      return true; // 无 tsconfig.json，向后兼容
+    const tsconfigPath = path.join(this.root, 'tsconfig.json');
+    if (!(await this.fs.exists(tsconfigPath))) {
+      return true; // 无 tsconfig.json，非 TS 项目，跳过
     }
+    return this.runCommand('npx tsc --noEmit');
   }
 
   private parseCommand(cmd: string): { command: string; args: string[] } {
@@ -253,8 +254,9 @@ export class VerifyService {
       cleanCodePassed = true;
     }
 
-    // 覆盖率收集（新增）
-    const coverage = await this.readCoverage();
+    // 覆盖率收集（light 模式跳过 coverage 检查）
+    const coverageSkipped = scale === 'light';
+    const coverage = coverageSkipped ? { passed: true } : await this.readCoverage();
 
     // lint + typecheck（新增）
     const lintPassed = await this.executeLint();
@@ -280,6 +282,7 @@ export class VerifyService {
       reportPath: '',
       passed,
       coveragePassed: coverage.passed,
+      coverageSkipped,
       coverageSummary: coverage.summary,
       lintPassed,
       typeCheckPassed,
@@ -325,8 +328,13 @@ export class VerifyService {
     lines.push(`| 构建 | ${result.buildPassed ? '✅ 通过' : '❌ 失败'} |`);
     lines.push(`| 测试 | ${result.testsPassed ? '✅ 通过' : '❌ 失败'} |`);
     lines.push(`| Clean Code | ${result.cleanCodePassed ? '✅ 通过' : '❌ 失败'} |`);
+    const coverageStatus = result.coverageSkipped
+      ? '⏭️ 跳过'
+      : result.coveragePassed
+        ? '✅ 通过'
+        : '❌ 未达标';
     lines.push(
-      `| 测试覆盖率 | ${result.coveragePassed ? '✅ 通过' : '❌ 未达标'} ${
+      `| 测试覆盖率 | ${coverageStatus} ${
         result.coverageSummary ? `(${result.coverageSummary.lines}% lines)` : ''
       } |`,
     );

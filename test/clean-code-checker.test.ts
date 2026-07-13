@@ -149,6 +149,23 @@ describe('CleanCodeChecker', () => {
       expect(issues).toHaveLength(0);
     });
 
+    it('字符串和注释中的 {} 不应被误计数影响函数边界检测', async () => {
+      const { CleanCodeChecker } = await import('../src/core/clean-code-checker.js');
+      const checker = new CleanCodeChecker();
+      const lines: string[] = ['function trickyFunc() {'];
+      // 字符串与注释中出现的不成对 { } 不应被朴素计数器误认为函数边界
+      lines.push('  const s = "{ not a brace";');
+      lines.push('  const t = "also } here";');
+      lines.push('  /* } */');
+      lines.push('  // trailing } line comment');
+      // 补足超过 50 行的真实函数体
+      for (let i = 0; i < 52; i++) lines.push(`  const x${i} = ${i};`);
+      lines.push('}');
+      const result = await checker.check(lines.join('\n'));
+      const issues = result.issues.filter((i) => i.rule === 'function-length');
+      expect(issues.length).toBeGreaterThanOrEqual(1);
+    });
+
     it('应检测超过 5 个参数的函数', async () => {
       const { CleanCodeChecker } = await import('../src/core/clean-code-checker.js');
       const checker = new CleanCodeChecker();

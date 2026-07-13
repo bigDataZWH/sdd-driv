@@ -145,8 +145,15 @@ export async function reviewCommand(
       break;
     }
     case 'submit': {
-      await reviewSystem.submitReview(changeName, reviewType);
-      const status = await reviewSystem.checkStatus(changeName, reviewType);
+      const status = await select<ReviewStatus>({
+        message: 'Select review result:',
+        choices: [
+          { name: '✓ Passed', value: 'passed' },
+          { name: '✗ Failed', value: 'failed' },
+          { name: '○ Pending', value: 'pending' },
+        ],
+      });
+      await reviewSystem.submitReview(changeName, reviewType, status);
       if (!options.json) {
         log(`  Review submitted. Current status: ${formatReviewStatus(status)}`);
       }

@@ -174,18 +174,86 @@ function findBlockStart(lines: string[], fromLine: number): number {
 }
 
 function findMatchingBrace(lines: string[], startLine: number): number {
+  const content = lines.join('\n');
+  let offset = 0;
+  for (let i = 0; i < startLine; i++) {
+    offset += lines[i].length + 1;
+  }
+
+  let inString = false;
+  let stringChar = '';
+  let inLineComment = false;
+  let inBlockComment = false;
   let depth = 0;
   let started = false;
-  for (let i = startLine; i < lines.length; i++) {
-    for (const ch of lines[i]) {
-      if (ch === '{') {
-        depth++;
-        started = true;
-      } else if (ch === '}') {
-        depth--;
+  let i = offset;
+
+  while (i < content.length) {
+    const char = content[i];
+    const nextChar = content[i + 1];
+
+    if (inLineComment) {
+      if (char === '\n') inLineComment = false;
+      i++;
+      continue;
+    }
+    if (inBlockComment) {
+      if (char === '*' && nextChar === '/') {
+        inBlockComment = false;
+        i += 2;
+        continue;
+      }
+      i++;
+      continue;
+    }
+    if (!inString) {
+      if (char === '/' && nextChar === '/') {
+        inLineComment = true;
+        i += 2;
+        continue;
+      }
+      if (char === '/' && nextChar === '*') {
+        inBlockComment = true;
+        i += 2;
+        continue;
       }
     }
-    if (started && depth === 0) return i;
+    if (inString) {
+      if (char === '\\') {
+        i += 2;
+        continue;
+      }
+      if (char === stringChar) {
+        inString = false;
+      }
+      i++;
+      continue;
+    }
+    if (char === '"' || char === "'" || char === '`') {
+      inString = true;
+      stringChar = char;
+      i++;
+      continue;
+    }
+    if (char === '{') {
+      depth++;
+      started = true;
+    } else if (char === '}') {
+      depth--;
+    }
+    i++;
+    if (started && depth === 0) {
+      const braceIdx = i - 1;
+      let charPos = 0;
+      for (let li = 0; li < lines.length; li++) {
+        const lineEnd = charPos + lines[li].length;
+        if (braceIdx >= charPos && braceIdx <= lineEnd) {
+          return li;
+        }
+        charPos = lineEnd + 1;
+      }
+      return -1;
+    }
   }
   return -1;
 }

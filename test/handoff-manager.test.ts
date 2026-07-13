@@ -215,6 +215,38 @@ describe('HandoffManager', () => {
     expect(handoff.context.reviews.length).toBeGreaterThan(0);
   });
 
+  it('generate 兼容 design.md 中的中文标题 决策 和 约束', async () => {
+    const zhChangeName = 'test-change-zh';
+    const changeDir = path.join(TMP_DIR, 'openspec', 'changes', zhChangeName);
+    await fs.promises.mkdir(changeDir, { recursive: true });
+    await fs.promises.writeFile(
+      path.join(changeDir, 'proposal.md'),
+      '# 提案\n\n实现用户登录功能',
+    );
+    await fs.promises.writeFile(
+      path.join(changeDir, 'design.md'),
+      '# 设计\n\n## 决策\n使用 JWT 认证\n采用 Redis 缓存\n\n## 约束\n响应时间 < 200ms\n必须支持高并发',
+    );
+    await fs.promises.writeFile(path.join(changeDir, 'tasks.md'), '# 任务\n\n- [ ] 实现登录 API');
+
+    const { HandoffManager } = await import('../src/core/handoff-manager.js');
+    const { FileSystem } = await import('../src/utils/file-system.js');
+    const { PathResolver } = await import('../src/core/path-resolver.js');
+    const { YamlParser } = await import('../src/utils/yaml-parser.js');
+
+    const fs_ = new FileSystem(TMP_DIR);
+    const resolver = new PathResolver(TMP_DIR);
+    const parser = new YamlParser(fs_);
+    const manager = new HandoffManager(fs_, resolver, parser);
+
+    const handoff = await manager.generate(zhChangeName, 'design', 'off');
+
+    expect(handoff.context.decisions).toContain('使用 JWT 认证');
+    expect(handoff.context.decisions).toContain('采用 Redis 缓存');
+    expect(handoff.context.constraints).toContain('响应时间 < 200ms');
+    expect(handoff.context.constraints).toContain('必须支持高并发');
+  });
+
   it('generate 使用 beta 压缩策略', async () => {
     await setupChangeDir(TMP_DIR, changeName);
     const { HandoffManager } = await import('../src/core/handoff-manager.js');

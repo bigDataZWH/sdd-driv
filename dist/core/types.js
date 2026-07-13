@@ -1,3 +1,4 @@
+import * as path from 'path';
 export const Phase = {
     Clarify: 'clarify',
     Design: 'design',
@@ -60,7 +61,6 @@ export function createDefaultState(changeName) {
                     design: `${changeDir}/design.md`,
                     tasks: `${changeDir}/tasks.md`,
                     specs: `${changeDir}/specs.json`,
-                    'design-converted': 'false',
                 },
             },
             design: {
@@ -90,5 +90,43 @@ export function createDefaultState(changeName) {
         archived: false,
         verifiedAt: null,
     };
+}
+/** 从 .driv/config.yaml 读取 defaults 段，用于覆盖 createDefaultState 的默认值 */
+export async function readDrivConfigDefaults(root) {
+    const configPath = path.join(root, '.driv', 'config.yaml');
+    try {
+        const { readFile } = await import('fs/promises');
+        const content = await readFile(configPath, 'utf-8');
+        const { parse } = await import('yaml');
+        const config = parse(content);
+        const defaults = config?.defaults;
+        if (!defaults)
+            return {};
+        return {
+            buildMode: defaults.build_mode,
+            tddMode: defaults.tdd_mode,
+            isolation: defaults.isolation,
+            verifyMode: defaults.verify_mode,
+            contextCompression: defaults.context_compression,
+        };
+    }
+    catch {
+        return {};
+    }
+}
+/** 用 .driv/config.yaml 的 defaults 段覆盖 ChangeState 中的默认值 */
+export async function applyConfigDefaults(state, root) {
+    const configDefaults = await readDrivConfigDefaults(root);
+    if (configDefaults.buildMode)
+        state.buildMode = configDefaults.buildMode;
+    if (configDefaults.tddMode)
+        state.tddMode = configDefaults.tddMode;
+    if (configDefaults.isolation)
+        state.isolation = configDefaults.isolation;
+    if (configDefaults.verifyMode)
+        state.verifyMode = configDefaults.verifyMode;
+    if (configDefaults.contextCompression)
+        state.contextCompression = configDefaults.contextCompression;
+    return state;
 }
 //# sourceMappingURL=types.js.map
