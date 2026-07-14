@@ -1,0 +1,46 @@
+change: refactor-clarify-prd-design-openspec
+workflow: full
+createdAt: 2026-07-14
+phase: clarify
+openspec:
+  changeDir: openspec/changes/refactor-clarify-prd-design-openspec
+  prd: openspec/changes/refactor-clarify-prd-design-openspec/prd.md
+superpowers: {}
+phases:
+  clarify:
+    status: in-progress
+    artifacts:
+      prd: openspec/changes/refactor-clarify-prd-design-openspec/prd.md
+  design:
+    status: pending
+    artifacts:
+      proposal: openspec/changes/refactor-clarify-prd-design-openspec/proposal.md
+      design: openspec/changes/refactor-clarify-prd-design-openspec/design.md
+      tasks: openspec/changes/refactor-clarify-prd-design-openspec/tasks.md
+      specs: openspec/changes/refactor-clarify-prd-design-openspec/specs.json
+      design-converted: 'false'
+      detailed-design-completed: 'false'
+  build:
+    status: pending
+    artifacts: {}
+  verify:
+    status: pending
+    artifacts: {}
+  archive:
+    status: pending
+    artifacts: {}
+buildMode: subagent-driven-development
+tddMode: tdd
+isolation: branch
+verifyMode: light
+verifyResult: pending
+hwProcess:
+  requirementReview: pending
+  technicalReview: pending
+  codeReview: pending
+baseRef: null
+headRef: null
+contextCompression: 'off'
+autoTransition: false
+archived: false
+verifiedAt: null
