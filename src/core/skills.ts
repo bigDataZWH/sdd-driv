@@ -2,6 +2,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { fileURLToPath } from 'url';
 import { fileExists, ensureDir, writeFile, readJson } from '../utils/file-system.js';
+import type { Logger } from '../utils/logger.js';
 import { getPlatformSkillsDir, type Platform } from './platforms.js';
 import type { InstallScope } from './types.js';
 
@@ -153,6 +154,7 @@ export async function copyDrivRulesForPlatform(
   platform: Platform,
   overwrite: boolean,
   scope: InstallScope = 'project',
+  logger?: Logger,
 ): Promise<{ copied: number; skipped: number }> {
   if (!platform.rulesDir || !platform.rulesFormat) {
     return { copied: 0, skipped: 0 };
@@ -176,7 +178,12 @@ export async function copyDrivRulesForPlatform(
   for (const ruleRelPath of rulePaths) {
     const src = path.join(DRIV_PACKAGE_ROOT, '.driv', ruleRelPath);
     if (!(await fileExists(src))) {
-      console.error(`    Rule source not found: ${ruleRelPath}`);
+      const msg = `    Rule source not found: ${ruleRelPath}`;
+      if (logger) {
+        logger.error(msg);
+      } else {
+        console.error(msg);
+      }
       continue;
     }
 
@@ -196,7 +203,12 @@ export async function copyDrivRulesForPlatform(
       await writeFile(dest, formatted);
       copied++;
     } catch (err) {
-      console.error(`    Failed to copy rule ${ruleRelPath}: ${(err as Error).message}`);
+      const msg = `    Failed to copy rule ${ruleRelPath}: ${(err as Error).message}`;
+      if (logger) {
+        logger.error(msg);
+      } else {
+        console.error(msg);
+      }
     }
   }
 

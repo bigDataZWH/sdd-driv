@@ -95,10 +95,10 @@ describe('DispatchPlan 结构', () => {
   });
 });
 
-describe('BuildOrchestrator', () => {
+describe('DispatchPlanBuilder', () => {
   it('generateDispatchPlan 返回有效 DispatchPlan', async () => {
-    const { BuildOrchestrator } = await import('../src/core/dispatch.js');
-    const orch = new BuildOrchestrator('test-change', ['src/core/dispatch.ts']);
+    const { DispatchPlanBuilder } = await import('../src/core/dispatch.js');
+    const orch = new DispatchPlanBuilder('test-change', ['src/core/dispatch.ts']);
     const plan = orch.generateDispatchPlan();
     expect(plan.phase).toBe('build');
     expect(plan.records.length).toBeGreaterThan(0);
@@ -106,8 +106,8 @@ describe('BuildOrchestrator', () => {
   });
 
   it('生成的记录包含 build-tsc / build-assets / test-build', async () => {
-    const { BuildOrchestrator } = await import('../src/core/dispatch.js');
-    const orch = new BuildOrchestrator('test-change', ['src/core/dispatch.ts']);
+    const { DispatchPlanBuilder } = await import('../src/core/dispatch.js');
+    const orch = new DispatchPlanBuilder('test-change', ['src/core/dispatch.ts']);
     const plan = orch.generateDispatchPlan();
     const taskIds = plan.records.map((r) => r.taskId);
     expect(taskIds).toContain('build-tsc');
@@ -116,32 +116,32 @@ describe('BuildOrchestrator', () => {
   });
 
   it('build-tsc 无依赖', async () => {
-    const { BuildOrchestrator } = await import('../src/core/dispatch.js');
-    const orch = new BuildOrchestrator('test-change', ['src/core/dispatch.ts']);
+    const { DispatchPlanBuilder } = await import('../src/core/dispatch.js');
+    const orch = new DispatchPlanBuilder('test-change', ['src/core/dispatch.ts']);
     const plan = orch.generateDispatchPlan();
     const tsc = plan.records.find((r) => r.taskId === 'build-tsc')!;
     expect(tsc.dependencies).toEqual([]);
   });
 
   it('build-assets 依赖 build-tsc', async () => {
-    const { BuildOrchestrator } = await import('../src/core/dispatch.js');
-    const orch = new BuildOrchestrator('test-change', ['src/core/dispatch.ts']);
+    const { DispatchPlanBuilder } = await import('../src/core/dispatch.js');
+    const orch = new DispatchPlanBuilder('test-change', ['src/core/dispatch.ts']);
     const plan = orch.generateDispatchPlan();
     const assets = plan.records.find((r) => r.taskId === 'build-assets')!;
     expect(assets.dependencies).toContain('build-tsc');
   });
 
   it('test-build 依赖 build-tsc', async () => {
-    const { BuildOrchestrator } = await import('../src/core/dispatch.js');
-    const orch = new BuildOrchestrator('test-change', ['src/core/dispatch.ts']);
+    const { DispatchPlanBuilder } = await import('../src/core/dispatch.js');
+    const orch = new DispatchPlanBuilder('test-change', ['src/core/dispatch.ts']);
     const plan = orch.generateDispatchPlan();
     const testTask = plan.records.find((r) => r.taskId === 'test-build')!;
     expect(testTask.dependencies).toContain('build-tsc');
   });
 
   it('inputPaths 只筛选 .ts 文件', async () => {
-    const { BuildOrchestrator } = await import('../src/core/dispatch.js');
-    const orch = new BuildOrchestrator('test-change', ['src/core/dispatch.ts', 'README.md']);
+    const { DispatchPlanBuilder } = await import('../src/core/dispatch.js');
+    const orch = new DispatchPlanBuilder('test-change', ['src/core/dispatch.ts', 'README.md']);
     const plan = orch.generateDispatchPlan();
     const tsc = plan.records.find((r) => r.taskId === 'build-tsc')!;
     expect(tsc.inputPaths).toContain('src/core/dispatch.ts');
@@ -149,8 +149,8 @@ describe('BuildOrchestrator', () => {
   });
 
   it('recordPlan 返回有效 DispatchReport', async () => {
-    const { BuildOrchestrator } = await import('../src/core/dispatch.js');
-    const orch = new BuildOrchestrator('test-change', ['src/core/dispatch.ts']);
+    const { DispatchPlanBuilder } = await import('../src/core/dispatch.js');
+    const orch = new DispatchPlanBuilder('test-change', ['src/core/dispatch.ts']);
     const plan = orch.generateDispatchPlan();
     const report = orch.recordPlan(plan);
     expect(report.plan).toBe(plan);
@@ -160,8 +160,8 @@ describe('BuildOrchestrator', () => {
   });
 
   it('recordPlan 从 plan.records 提取基础记录填充 results', async () => {
-    const { BuildOrchestrator } = await import('../src/core/dispatch.js');
-    const orch = new BuildOrchestrator('test-change', ['src/core/dispatch.ts']);
+    const { DispatchPlanBuilder } = await import('../src/core/dispatch.js');
+    const orch = new DispatchPlanBuilder('test-change', ['src/core/dispatch.ts']);
     const plan = orch.generateDispatchPlan();
     const report = orch.recordPlan(plan);
     // results 非空，且与 plan.records 数量一致
@@ -181,9 +181,9 @@ describe('BuildOrchestrator', () => {
 
 describe('ArchiveReportService', () => {
   it('generateReport 返回非空 markdown 字符串', async () => {
-    const { BuildOrchestrator, ArchiveReportService } = await import('../src/core/dispatch.js');
+    const { DispatchPlanBuilder, ArchiveReportService } = await import('../src/core/dispatch.js');
     const svc = new ArchiveReportService();
-    const orch = new BuildOrchestrator('test-change', ['src/core/dispatch.ts']);
+    const orch = new DispatchPlanBuilder('test-change', ['src/core/dispatch.ts']);
     const plan = orch.generateDispatchPlan();
     const report = orch.recordPlan(plan);
     const md = svc.generateReport(report);
@@ -192,9 +192,9 @@ describe('ArchiveReportService', () => {
   });
 
   it('报告中包含任务详情', async () => {
-    const { BuildOrchestrator, ArchiveReportService } = await import('../src/core/dispatch.js');
+    const { DispatchPlanBuilder, ArchiveReportService } = await import('../src/core/dispatch.js');
     const svc = new ArchiveReportService();
-    const orch = new BuildOrchestrator('test-change', ['src/core/dispatch.ts']);
+    const orch = new DispatchPlanBuilder('test-change', ['src/core/dispatch.ts']);
     const plan = orch.generateDispatchPlan();
     const report = orch.recordPlan(plan);
     const md = svc.generateReport(report);
@@ -204,9 +204,9 @@ describe('ArchiveReportService', () => {
   });
 
   it('报告中包含状态图标（待定）', async () => {
-    const { BuildOrchestrator, ArchiveReportService } = await import('../src/core/dispatch.js');
+    const { DispatchPlanBuilder, ArchiveReportService } = await import('../src/core/dispatch.js');
     const svc = new ArchiveReportService();
-    const orch = new BuildOrchestrator('test-change', ['src/core/dispatch.ts']);
+    const orch = new DispatchPlanBuilder('test-change', ['src/core/dispatch.ts']);
     const plan = orch.generateDispatchPlan();
     const report = orch.recordPlan(plan);
     const md = svc.generateReport(report);
@@ -296,10 +296,10 @@ describe('ArchiveReportService', () => {
   });
 });
 
-describe('PhaseGuard', () => {
+describe('DispatchPhaseGuard', () => {
   it('canTransition 允许合法的阶段转换', async () => {
-    const { PhaseGuard } = await import('../src/core/dispatch.js');
-    const guard = new PhaseGuard();
+    const { DispatchPhaseGuard } = await import('../src/core/dispatch.js');
+    const guard = new DispatchPhaseGuard();
     expect(guard.canTransition('clarify', 'design').allowed).toBe(true);
     expect(guard.canTransition('design', 'build').allowed).toBe(true);
     expect(guard.canTransition('build', 'verify').allowed).toBe(true);
@@ -307,31 +307,31 @@ describe('PhaseGuard', () => {
   });
 
   it('canTransition 拒绝不合法的阶段转换', async () => {
-    const { PhaseGuard } = await import('../src/core/dispatch.js');
-    const guard = new PhaseGuard();
+    const { DispatchPhaseGuard } = await import('../src/core/dispatch.js');
+    const guard = new DispatchPhaseGuard();
     const result = guard.canTransition('clarify', 'build');
     expect(result.allowed).toBe(false);
     expect(result.reason).toBeTruthy();
   });
 
   it('canTransition 拒绝逆向转换', async () => {
-    const { PhaseGuard } = await import('../src/core/dispatch.js');
-    const guard = new PhaseGuard();
+    const { DispatchPhaseGuard } = await import('../src/core/dispatch.js');
+    const guard = new DispatchPhaseGuard();
     expect(guard.canTransition('build', 'design').allowed).toBe(false);
     expect(guard.canTransition('verify', 'build').allowed).toBe(false);
   });
 
   it('canTransition 拒绝从 archive 出发', async () => {
-    const { PhaseGuard } = await import('../src/core/dispatch.js');
-    const guard = new PhaseGuard();
+    const { DispatchPhaseGuard } = await import('../src/core/dispatch.js');
+    const guard = new DispatchPhaseGuard();
     const result = guard.canTransition('archive', 'clarify');
     expect(result.allowed).toBe(false);
     expect(result.reason).toContain('无后续阶段');
   });
 
   it('build → verify 阻塞: failCount > 0', async () => {
-    const { PhaseGuard } = await import('../src/core/dispatch.js');
-    const guard = new PhaseGuard();
+    const { DispatchPhaseGuard } = await import('../src/core/dispatch.js');
+    const guard = new DispatchPhaseGuard();
     const report = {
       plan: { phase: 'build' as const, changeName: '', records: [], generatedAt: '' },
       results: [],
@@ -346,8 +346,8 @@ describe('PhaseGuard', () => {
   });
 
   it('build → verify 阻塞: 有 fail 状态的 records', async () => {
-    const { PhaseGuard } = await import('../src/core/dispatch.js');
-    const guard = new PhaseGuard();
+    const { DispatchPhaseGuard } = await import('../src/core/dispatch.js');
+    const guard = new DispatchPhaseGuard();
     const report = {
       plan: {
         phase: 'build' as const,
@@ -377,8 +377,8 @@ describe('PhaseGuard', () => {
   });
 
   it('build → verify 阻塞: 有 failed verification', async () => {
-    const { PhaseGuard } = await import('../src/core/dispatch.js');
-    const guard = new PhaseGuard();
+    const { DispatchPhaseGuard } = await import('../src/core/dispatch.js');
+    const guard = new DispatchPhaseGuard();
     const report = {
       plan: { phase: 'build' as const, changeName: '', records: [], generatedAt: '' },
       results: [],
@@ -393,8 +393,8 @@ describe('PhaseGuard', () => {
   });
 
   it('build → verify 允许: 报告为空（无失败）', async () => {
-    const { PhaseGuard } = await import('../src/core/dispatch.js');
-    const guard = new PhaseGuard();
+    const { DispatchPhaseGuard } = await import('../src/core/dispatch.js');
+    const guard = new DispatchPhaseGuard();
     const report = {
       plan: { phase: 'build' as const, changeName: '', records: [], generatedAt: '' },
       results: [],
@@ -408,11 +408,11 @@ describe('PhaseGuard', () => {
   });
 
   it('VALID_TRANSITIONS 包含所有合法转换', async () => {
-    const { PhaseGuard } = await import('../src/core/dispatch.js');
-    expect(PhaseGuard.VALID_TRANSITIONS).toHaveLength(4);
-    expect(PhaseGuard.VALID_TRANSITIONS).toContainEqual(['clarify', 'design']);
-    expect(PhaseGuard.VALID_TRANSITIONS).toContainEqual(['design', 'build']);
-    expect(PhaseGuard.VALID_TRANSITIONS).toContainEqual(['build', 'verify']);
-    expect(PhaseGuard.VALID_TRANSITIONS).toContainEqual(['verify', 'archive']);
+    const { DispatchPhaseGuard } = await import('../src/core/dispatch.js');
+    expect(DispatchPhaseGuard.VALID_TRANSITIONS).toHaveLength(4);
+    expect(DispatchPhaseGuard.VALID_TRANSITIONS).toContainEqual(['clarify', 'design']);
+    expect(DispatchPhaseGuard.VALID_TRANSITIONS).toContainEqual(['design', 'build']);
+    expect(DispatchPhaseGuard.VALID_TRANSITIONS).toContainEqual(['build', 'verify']);
+    expect(DispatchPhaseGuard.VALID_TRANSITIONS).toContainEqual(['verify', 'archive']);
   });
 });

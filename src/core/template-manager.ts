@@ -1,4 +1,6 @@
 import { FileSystem } from '../utils/file-system.js';
+import { Logger } from '../utils/logger.js';
+import { parseFrontmatter } from '../utils/markdown.js';
 import { PlaceholderParser } from './placeholder-parser.js';
 import { applyInheritance, resolveChain, type InheritanceRule } from './template-inheritance.js';
 import { parse as parseYaml } from 'yaml';
@@ -198,29 +200,23 @@ function resolveSearchPath(
 export class TemplateManager {
   private fs: FileSystem;
   private root: string;
+  private logger?: Logger;
   private configCache: TemplateConfig | null = null;
   private frontmatterCache: Map<string, Record<string, unknown> | null> = new Map();
   // 模板内容缓存：key 为 `${type}/${name}`，避免 applyTemplate 等场景重复读盘
   private contentCache: Map<string, string> = new Map();
 
-  constructor(fs: FileSystem, root: string) {
+  constructor(fs: FileSystem, root: string, logger?: Logger) {
     this.fs = fs;
     this.root = root;
+    this.logger = logger;
   }
 
-  private parseFrontmatter(content: string): Record<string, unknown> | null {
-    const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
-    if (!match) return null;
-    try {
-      const parsed = parseYaml(match[1]);
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        return parsed as Record<string, unknown>;
-      }
-      return null;
-    } catch (error) {
-      // 不破坏返回 null 的契约，但记录告警以便排查
-      console.warn(`[driv] frontmatter YAML 解析失败: ${(error as Error).message}`);
-      return null;
+  private warn(msg: string): void {
+    if (this.logger) {
+      this.logger.warn(msg);
+    } else {
+      console.warn(msg);
     }
   }
 
@@ -296,7 +292,7 @@ export class TemplateManager {
     }
     const content = await this.fs.readFile(filePath);
     // 解析 frontmatter 并缓存，供 validateTemplate 等消费
-    this.frontmatterCache.set(key, this.parseFrontmatter(content));
+    this.frontmatterCache.set(key, parseFrontmatter(content));
     this.contentCache.set(key, content);
     return content;
   }
@@ -382,14 +378,14 @@ export class TemplateManager {
     if (customContent !== null) {
       // 自定义模板命中时也填充 frontmatterCache，保持与 loadTemplate 一致的填充时机
       const baseName = basenameWithoutExtension(selectedPath);
-      this.frontmatterCache.set(`${type}/${baseName}`, this.parseFrontmatter(customContent));
+      this.frontmatterCache.set(`${type}/${baseName}`, parseFrontmatter(customContent));
       return customContent;
     }
 
     // Core 层
     const coreContent = await this.readTemplatePath(selectedPath);
     const coreBaseName = basenameWithoutExtension(selectedPath);
-    this.frontmatterCache.set(`${type}/${coreBaseName}`, this.parseFrontmatter(coreContent));
+    this.frontmatterCache.set(`${type}/${coreBaseName}`, parseFrontmatter(coreContent));
     return coreContent;
   }
 
@@ -456,7 +452,7 @@ export class TemplateManager {
           content = applyInheritance(parentContent, content, rule);
         }
       } catch (error) {
-        console.warn(
+        this.warn(
           `[driv] 模板继承: 父模板 '${rule.parent}' 加载失败，使用子模板: ${(error as Error).message}`,
         );
       }
@@ -488,7 +484,7 @@ export class TemplateManager {
     }
 
     // 校验 frontmatter 中声明的 placeholders_required 是否在模板中使用
-    const frontmatter = this.parseFrontmatter(content);
+    const frontmatter = parseFrontmatter(content);
     if (frontmatter) {
       this.frontmatterCache.set(`${type}/${name}`, frontmatter);
       const required = frontmatter.placeholders_required;
@@ -530,7 +526,7 @@ export class TemplateManager {
       }));
       return resolveChain(normalizedRules, name);
     } catch (error) {
-      console.warn(`[driv] 继承链解析失败: ${(error as Error).message}`);
+      this.warn(`[driv] 继承链解析失败: ${(error as Error).message}`);
       return [name];
     }
   }

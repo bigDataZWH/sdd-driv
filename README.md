@@ -35,7 +35,7 @@ OpenSpec handles **WHAT** (proposals, spec lifecycle, archiving).
 Superpowers handles **HOW** (brainstorming, technical design, execution).
 
 Driv chains the two into a five-phase automated pipeline with a resumable state machine, phase guard gates, a template
-system, and quality review gates.
+system, quality review gates, and a ServiceContainer for dependency injection.
 
 ## Why Driv
 
@@ -181,15 +181,16 @@ Creates, submits, and checks requirement / technical / code reviews for an activ
 
 | Phase     | Command           | Owner         | Artifacts                                                          |
 | --------- | ----------------- | ------------- | ----------------------------------------------------------------- |
-| 1. Clarify | `/driv-clarify`   | OpenSpec      | proposal.md, .openspec.yaml                                       |
-| 2. Design  | `/driv-design`    | Superpowers   | design.md, handoff package, technical review                      |
+| 1. Clarify | `/driv-clarify`   | OpenSpec      | prd.md, .openspec.yaml, .driv.yaml                                |
+| 2. Design  | `/driv-design`    | Superpowers   | proposal.md, design.md, tasks.md, specs/, handoff, technical review |
 | 3. Build   | `/driv-build`     | Superpowers   | Superpowers plan, code commits, Clean Code check, code review     |
 | 4. Verify  | `/driv-verify`    | Both          | Verification report, branch handling                              |
 | 5. Archive | `/driv-archive`   | OpenSpec      | Delta Spec merge, archive                                          |
 
 ### Core Principles
 
-- **Clarify cannot be skipped** — every change must first produce a proposal and OpenSpec metadata
+- **Clarify cannot be skipped** — every change must first produce a PRD and initialize state files
+- **Design produces all OpenSpec deliverables** — proposal.md, specs, tasks.md are generated from PRD + brainstorming
 - **Design produces a handoff** — hash verification ensures artifact consistency
 - **Keep `tasks.md` in sync** — tick off each task as it completes
 - **Commit frequently** — one commit per task
@@ -237,6 +238,7 @@ phase: build
 created_at: 2026-06-28
 openspec:
   change_dir: openspec/changes/feature-user-auth
+  prd: openspec/changes/feature-user-auth/prd.md
   proposal: openspec/changes/feature-user-auth/proposal.md
   design: openspec/changes/feature-user-auth/design.md
   tasks: openspec/changes/feature-user-auth/tasks.md
@@ -244,12 +246,16 @@ phases:
   clarify:
     status: completed
     artifacts:
-      proposal: openspec/changes/feature-user-auth/proposal.md
+      prd: openspec/changes/feature-user-auth/prd.md
   design:
     status: completed
     artifacts:
+      proposal: openspec/changes/feature-user-auth/proposal.md
       design: openspec/changes/feature-user-auth/design.md
       tasks: openspec/changes/feature-user-auth/tasks.md
+      specs: openspec/changes/feature-user-auth/specs.json
+      design-converted: 'true'
+      detailed-design-completed: 'true'
   build:
     status: in_progress
     artifacts:
@@ -282,8 +288,8 @@ Each phase has hard check rules at both entry and exit:
 
 | Phase Exit | Check Conditions                                                                                       |
 | ---------- | ------------------------------------------------------------------------------------------------------ |
-| Clarify    | proposal.md exists, .openspec.yaml exists                                                              |
-| Design     | design.md exists, handoff is valid, technical review passed                                            |
+| Clarify    | prd.md exists, .openspec.yaml exists, .driv.yaml initialized                                           |
+| Design     | proposal.md exists, specs created, tasks.md exists, design-converted, handoff valid, technical review passed |
 | Build      | plan exists, mode selected, code committed, tests passed, Clean Code passed, code review passed        |
 | Verify     | verification report exists, branch handling done                                                       |
 | Archive    | change moved to archive, spec merged                                                                   |
@@ -297,6 +303,7 @@ Default templates live in `.driv/templates/`:
 | proposals  | default, feature, bugfix, refactor, config, docs                                        |
 | designs    | default, feature, architecture, interface, performance                                  |
 | specs      | default, capability, api, component, service                                           |
+| prds       | default                                                                                 |
 | reviews    | requirement-review, technical-review, code-review                                       |
 
 ### 4-Layer Template Stack
@@ -434,7 +441,8 @@ your-project/
 │   │   └── <name>/
 │   │       ├── .driv.yaml           # Workflow state
 │   │       ├── .driv/handoff/       # Handoff package
-│   │       ├── proposal.md
+│   │       ├── prd.md               # Product Requirements Document (Clarify phase)
+│   │       ├── proposal.md          # Change proposal (Design phase)
 │   │       ├── design.md
 │   │       ├── specs/<capability>/spec.md
 │   │       ├── tasks.md

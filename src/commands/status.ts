@@ -2,6 +2,7 @@ import * as path from 'path';
 import { promises as fs } from 'fs';
 import { parse } from 'yaml';
 import { fileExists } from '../utils/file-system.js';
+import { listActiveChangeNames } from './helpers.js';
 
 export interface ChangeStatus {
   name: string;
@@ -65,15 +66,11 @@ function getOptionalString(value: unknown): string | null {
 
 export async function getActiveChanges(projectPath: string): Promise<ChangeStatus[]> {
   const changesDir = path.join(projectPath, 'openspec', 'changes');
-  if (!(await fileExists(changesDir))) return [];
-
-  const entries = await fs.readdir(changesDir, { withFileTypes: true });
+  const names = await listActiveChangeNames(projectPath);
   const changes: ChangeStatus[] = [];
 
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-
-    const changeDir = path.join(changesDir, entry.name);
+  for (const name of names) {
+    const changeDir = path.join(changesDir, name);
     const state = await readDrivState(changeDir);
     if (!state) continue;
     if (state.archived === true || state.archived === 'true') continue;
@@ -90,7 +87,7 @@ export async function getActiveChanges(projectPath: string): Promise<ChangeStatu
         : {};
 
     changes.push({
-      name: getString(state.change, entry.name),
+      name: getString(state.change, name),
       workflow: getString(state.workflow, 'full'),
       phase,
       buildMode: getString(state.buildMode, 'unset'),

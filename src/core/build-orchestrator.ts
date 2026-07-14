@@ -4,6 +4,7 @@ import { StateMachine } from './state-machine.js';
 import { GitOps } from './git-ops.js';
 import { PathResolver } from './path-resolver.js';
 import { HandoffManager } from './handoff-manager.js';
+import { ChangeState } from './types.js';
 
 export interface BuildModeConfig {
   buildMode: string;
@@ -67,7 +68,7 @@ export class BuildOrchestrator {
     }
   }
 
-  private generatePlanContent(state: any, handoffHash: string): string {
+  private generatePlanContent(state: ChangeState, handoffHash: string): string {
     const today = new Date().toISOString().slice(0, 10);
     const lines: string[] = [
       '---',

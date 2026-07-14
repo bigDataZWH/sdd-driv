@@ -243,4 +243,156 @@ describe('StateMachine', () => {
       expect(state.phases.design.artifacts.specs).toBe(specs.join(','));
     });
   });
+
+  describe('2.7 边界情况', () => {
+    it('transition 在当前阶段无效（currentIndex < 0）时抛出错误', async () => {
+      await stateMachine.initChange('test-change');
+      // 将 phase 改为非法值，使 PHASE_ORDER.indexOf 返回 -1
+      await stateMachine.setField('test-change', 'phase', 'invalid-phase');
+
+      await expect(stateMachine.transition('test-change', 'design')).rejects.toThrow(
+        /无效的当前阶段/,
+      );
+    });
+
+    it('getState 在状态文件损坏/无效时抛出错误', async () => {
+      const statePath = path.join(
+        tmpDir,
+        'openspec',
+        'changes',
+        'corrupt-change',
+        '.driv.yaml',
+      );
+      fs.mkdirSync(path.dirname(statePath), { recursive: true });
+      // 写入缺少 change 字段的内容，validateChangeState 应抛出
+      fs.writeFileSync(statePath, 'foo: bar\n', 'utf-8');
+
+      await expect(stateMachine.getState('corrupt-change')).rejects.toThrow(/Invalid state/);
+    });
+
+    it('setField 更新嵌套字段 hwProcess.technicalReview', async () => {
+      await stateMachine.initChange('test-change');
+      await stateMachine.setField('test-change', 'hwProcess.technicalReview', 'passed');
+
+      const state = await stateMachine.getState('test-change');
+      expect(state.hwProcess.technicalReview).toBe('passed');
+      // 其他字段保留
+      expect(state.hwProcess.requirementReview).toBe('pending');
+      expect(state.hwProcess.codeReview).toBe('pending');
+      expect(state.change).toBe('test-change');
+    });
+  });
+
+  describe('2.8 Round 44: 转换与缓存边界用例', () => {
+    it('从 archive（最终阶段）转换抛出错误（无后续阶段）', async () => {
+      await stateMachine.initChange('test-change');
+      // 完整转换到 archive
+      await stateMachine.transition('test-change', 'design');
+      await stateMachine.transition('test-change', 'build');
+      await stateMachine.transition('test-change', 'verify');
+      await stateMachine.transition('test-change', 'archive');
+
+      // 从 archive 转换到任何阶段都应抛出（无向前转换可能）
+      await expect(stateMachine.transition('test-change', 'verify')).rejects.toThrow();
+      await expect(stateMachine.transition('test-change', 'clarify')).rejects.toThrow();
+    });
+
+    it('从 archive 转换到自身也抛出错误', async () => {
+      await stateMachine.initChange('test-change');
+      await stateMachine.transition('test-change', 'design');
+      await stateMachine.transition('test-change', 'build');
+      await stateMachine.transition('test-change', 'verify');
+      await stateMachine.transition('test-change', 'archive');
+
+      await expect(stateMachine.transition('test-change', 'archive')).rejects.toThrow();
+    });
+
+    it('transition 非相邻阶段（clarify → build）抛出错误', async () => {
+      await stateMachine.initChange('test-change');
+      await expect(stateMachine.transition('test-change', 'build')).rejects.toThrow(
+        /不允许从.*转换到/,
+      );
+    });
+
+    it('transition 向后转换（design → clarify）抛出错误', async () => {
+      await stateMachine.initChange('test-change');
+      await stateMachine.transition('test-change', 'design');
+      await expect(stateMachine.transition('test-change', 'clarify')).rejects.toThrow(
+        /不允许从.*转换到/,
+      );
+    });
+
+    it('validate 有效状态返回 true', async () => {
+      await stateMachine.initChange('test-change');
+      const valid = await stateMachine.validate('test-change');
+      expect(valid).toBe(true);
+    });
+
+    it('validate 缺少 phases 字段返回 false', async () => {
+      const statePath = path.join(
+        tmpDir,
+        'openspec',
+        'changes',
+        'no-phases-change',
+        '.driv.yaml',
+      );
+      fs.mkdirSync(path.dirname(statePath), { recursive: true });
+      fs.writeFileSync(
+        statePath,
+        'change: no-phases-change\nworkflow: full\nphase: clarify\n',
+        'utf-8',
+      );
+      const valid = await stateMachine.validate('no-phases-change');
+      expect(valid).toBe(false);
+    });
+
+    it('clearCache 后 getState 返回手动修改的最新数据', async () => {
+      await stateMachine.initChange('test-change');
+      const stateFilePath = path.join(
+        tmpDir,
+        'openspec',
+        'changes',
+        'test-change',
+        '.driv.yaml',
+      );
+
+      // 初次读取，填充缓存
+      const state1 = await stateMachine.getState('test-change');
+      expect(state1.workflow).toBe('full');
+
+      // 手动修改文件
+      let content = fs.readFileSync(stateFilePath, 'utf-8');
+      content = content.replace('workflow: full', 'workflow: light');
+      fs.writeFileSync(stateFilePath, content, 'utf-8');
+
+      // clearCache 后 getState 返回最新数据
+      stateMachine.clearCache('test-change');
+      const state2 = await stateMachine.getState('test-change');
+      expect(state2.workflow).toBe('light');
+    });
+
+    it('clearCache（无参数）清除所有缓存后 getState 返回最新数据', async () => {
+      await stateMachine.initChange('test-change');
+      const stateFilePath = path.join(
+        tmpDir,
+        'openspec',
+        'changes',
+        'test-change',
+        '.driv.yaml',
+      );
+
+      // 初次读取，填充缓存
+      await stateMachine.getState('test-change');
+
+      // 手动修改文件
+      let content = fs.readFileSync(stateFilePath, 'utf-8');
+      content = content.replace('workflow: full', 'workflow: light');
+      fs.writeFileSync(stateFilePath, content, 'utf-8');
+
+      // clearCache（无参数）清除所有缓存
+      stateMachine.clearCache();
+      const state = await stateMachine.getState('test-change');
+      expect(state.workflow).toBe('light');
+    });
+  });
 });

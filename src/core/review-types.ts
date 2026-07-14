@@ -27,15 +27,17 @@ export interface ReviewFinding {
 }
 
 export interface ChecklistItem {
-  check: string;
-  passed: boolean;
-  detail: string;
+  name: string;
+  description: string;
   autoCheck: boolean;
+  passed?: boolean;
+  detail?: string;
 }
 
 export interface ChecklistResult {
   type: ReviewType;
   items: ChecklistItem[];
+  allAutoPassed: boolean;
   timestamp: string;
 }
 

@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import { FileSystem } from '../utils/file-system.js';
 import { YamlParser } from '../utils/yaml-parser.js';
 import { PathResolver } from './path-resolver.js';
@@ -5,10 +6,23 @@ import { Phase, ChangeState, createDefaultState } from './types.js';
 
 const PHASE_ORDER: Phase[] = ['clarify', 'design', 'build', 'verify', 'archive'];
 
+function validateChangeState(data: unknown): ChangeState {
+  if (!data || typeof data !== 'object') throw new Error('Invalid state: not an object');
+  const obj = data as Record<string, unknown>;
+  if (!obj.change || typeof obj.change !== 'string')
+    throw new Error('Invalid state: missing change');
+  if (!obj.phase || typeof obj.phase !== 'string') throw new Error('Invalid state: missing phase');
+  if (!obj.phases || typeof obj.phases !== 'object') throw new Error('Invalid state: missing phases');
+  return data as unknown as ChangeState;
+}
+
 export class StateMachine {
   private fs: FileSystem;
   private parser: YamlParser;
   private resolver: PathResolver;
+  private stateCache = new Map<string, ChangeState>();
+  private stateMtime = new Map<string, number>();
+  private stateSize = new Map<string, number>();
 
   constructor(fs: FileSystem, parser: YamlParser, resolver: PathResolver) {
     this.fs = fs;
@@ -18,15 +32,64 @@ export class StateMachine {
 
   async initChange(changeName: string): Promise<void> {
     const state = createDefaultState(changeName);
-    const yamlContent = this.parser.stringify(state as unknown as Record<string, unknown>);
+    const yamlContent = this.parser.stringify(state);
     const filePath = this.resolver.stateFile(changeName);
     await this.fs.writeFile(filePath, yamlContent);
+    this.stateCache.delete(changeName);
+    this.stateMtime.delete(changeName);
+    this.stateSize.delete(changeName);
+  }
+
+  clearCache(changeName?: string): void {
+    if (changeName) {
+      this.stateCache.delete(changeName);
+      this.stateMtime.delete(changeName);
+      this.stateSize.delete(changeName);
+    } else {
+      this.stateCache.clear();
+      this.stateMtime.clear();
+      this.stateSize.clear();
+    }
   }
 
   async getState(changeName: string): Promise<ChangeState> {
     const filePath = this.resolver.stateFile(changeName);
+    const stat = await fs.promises.stat(filePath);
+    const mtime = stat.mtimeMs;
+    const size = stat.size;
+    const cached = this.stateCache.get(changeName);
+    if (
+      cached !== undefined &&
+      this.stateMtime.get(changeName) === mtime &&
+      this.stateSize.get(changeName) === size
+    ) {
+      return cached;
+    }
     const data = await this.parser.readFile(filePath);
-    return data as unknown as ChangeState;
+    const state = validateChangeState(data);
+    this.stateCache.set(changeName, state);
+    this.stateMtime.set(changeName, mtime);
+    this.stateSize.set(changeName, size);
+    return state;
+  }
+
+  private async writeState(changeName: string, state: ChangeState): Promise<void> {
+    const filePath = this.resolver.stateFile(changeName);
+    const yamlContent = this.parser.stringify(state);
+    await this.fs.writeFile(filePath, yamlContent);
+    const stat = await fs.promises.stat(filePath);
+    this.stateCache.set(changeName, state);
+    this.stateMtime.set(changeName, stat.mtimeMs);
+    this.stateSize.set(changeName, stat.size);
+  }
+
+  private async updateState(
+    changeName: string,
+    mutator: (state: ChangeState) => void,
+  ): Promise<void> {
+    const state = await this.getState(changeName);
+    mutator(state);
+    await this.writeState(changeName, state);
   }
 
   async validate(changeName: string): Promise<boolean> {
@@ -46,11 +109,9 @@ export class StateMachine {
   }
 
   async setField(changeName: string, field: string, value: unknown): Promise<void> {
-    const filePath = this.resolver.stateFile(changeName);
-    const data = await this.parser.readFile(filePath);
-    this.parser.setField(data, field, value);
-    const yamlContent = this.parser.stringify(data);
-    await this.fs.writeFile(filePath, yamlContent);
+    await this.updateState(changeName, (state) => {
+      this.parser.setField(state as unknown as Record<string, unknown>, field, value);
+    });
   }
 
   async transition(changeName: string, toPhase: string): Promise<void> {
@@ -79,9 +140,7 @@ export class StateMachine {
 
     state.phase = toPhase as Phase;
 
-    const filePath = this.resolver.stateFile(changeName);
-    const yamlContent = this.parser.stringify(state as unknown as Record<string, unknown>);
-    await this.fs.writeFile(filePath, yamlContent);
+    await this.writeState(changeName, state);
   }
 
   assessScale(tasks: string[], changedFiles: string[]): string {
@@ -92,72 +151,56 @@ export class StateMachine {
   }
 
   async setPrdPath(changeName: string, prdPath: string): Promise<void> {
-    const state = await this.getState(changeName);
-    state.openspec.prd = prdPath;
-    state.phases.clarify.artifacts.prd = prdPath;
-    const filePath = this.resolver.stateFile(changeName);
-    const yamlContent = this.parser.stringify(state as unknown as Record<string, unknown>);
-    await this.fs.writeFile(filePath, yamlContent);
+    await this.updateState(changeName, (state) => {
+      state.openspec.prd = prdPath;
+      state.phases.clarify.artifacts.prd = prdPath;
+    });
   }
 
   async setProposalPath(changeName: string, proposalPath: string): Promise<void> {
-    const state = await this.getState(changeName);
-    state.openspec.proposal = proposalPath;
-    state.phases.design.artifacts.proposal = proposalPath;
-    const filePath = this.resolver.stateFile(changeName);
-    const yamlContent = this.parser.stringify(state as unknown as Record<string, unknown>);
-    await this.fs.writeFile(filePath, yamlContent);
+    await this.updateState(changeName, (state) => {
+      state.openspec.proposal = proposalPath;
+      state.phases.design.artifacts.proposal = proposalPath;
+    });
   }
 
   async setDesignPath(changeName: string, designPath: string): Promise<void> {
-    const state = await this.getState(changeName);
-    state.openspec.design = designPath;
-    state.phases.design.artifacts.design = designPath;
-    const filePath = this.resolver.stateFile(changeName);
-    const yamlContent = this.parser.stringify(state as unknown as Record<string, unknown>);
-    await this.fs.writeFile(filePath, yamlContent);
+    await this.updateState(changeName, (state) => {
+      state.openspec.design = designPath;
+      state.phases.design.artifacts.design = designPath;
+    });
   }
 
   async setTasksPath(changeName: string, tasksPath: string): Promise<void> {
-    const state = await this.getState(changeName);
-    state.openspec.tasks = tasksPath;
-    state.phases.design.artifacts.tasks = tasksPath;
-    const filePath = this.resolver.stateFile(changeName);
-    const yamlContent = this.parser.stringify(state as unknown as Record<string, unknown>);
-    await this.fs.writeFile(filePath, yamlContent);
+    await this.updateState(changeName, (state) => {
+      state.openspec.tasks = tasksPath;
+      state.phases.design.artifacts.tasks = tasksPath;
+    });
   }
 
   async setSpecsPaths(changeName: string, specsPaths: string[]): Promise<void> {
-    const state = await this.getState(changeName);
-    state.openspec.specs = specsPaths;
-    state.phases.design.artifacts.specs = specsPaths.join(',');
-    const filePath = this.resolver.stateFile(changeName);
-    const yamlContent = this.parser.stringify(state as unknown as Record<string, unknown>);
-    await this.fs.writeFile(filePath, yamlContent);
+    await this.updateState(changeName, (state) => {
+      state.openspec.specs = specsPaths;
+      state.phases.design.artifacts.specs = specsPaths.join(',');
+    });
   }
 
   async setDesignConverted(changeName: string, value: string): Promise<void> {
-    const state = await this.getState(changeName);
-    state.phases.design.artifacts['design-converted'] = value;
-    const filePath = this.resolver.stateFile(changeName);
-    const yamlContent = this.parser.stringify(state as unknown as Record<string, unknown>);
-    await this.fs.writeFile(filePath, yamlContent);
+    await this.updateState(changeName, (state) => {
+      state.phases.design.artifacts['design-converted'] = value;
+    });
   }
 
   async setDetailedDesignCompleted(changeName: string): Promise<void> {
-    const state = await this.getState(changeName);
-    state.phases.design.artifacts['detailed-design-completed'] = 'true';
-    const filePath = this.resolver.stateFile(changeName);
-    const yamlContent = this.parser.stringify(state as unknown as Record<string, unknown>);
-    await this.fs.writeFile(filePath, yamlContent);
+    await this.updateState(changeName, (state) => {
+      state.phases.design.artifacts['detailed-design-completed'] = 'true';
+    });
   }
 
   async setBrainstormingPath(changeName: string, brainstormingPath: string): Promise<void> {
-    const state = await this.getState(changeName);
-    state.superpowers.brainstorming = brainstormingPath;
-    state.phases.design.artifacts.brainstorming = brainstormingPath;
-    const filePath = this.resolver.stateFile(changeName);
-    const yamlContent = this.parser.stringify(state as unknown as Record<string, unknown>);
-    await this.fs.writeFile(filePath, yamlContent);
+    await this.updateState(changeName, (state) => {
+      state.superpowers.brainstorming = brainstormingPath;
+      state.phases.design.artifacts.brainstorming = brainstormingPath;
+    });
   }
 }

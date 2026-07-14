@@ -28,6 +28,14 @@ interface RuleCategory {
   weight: number;
 }
 
+const MAX_FUNCTION_LENGTH = 50;
+const MAX_CLASS_LENGTH = 500;
+const MAX_NESTING_DEPTH = 4;
+const MAX_PARAMS = 5;
+const MAX_CYCLOMATIC = 10;
+const PASS_SCORE = 80;
+const DUPLICATE_BLOCK_SIZE = 5;
+
 const CATEGORIES: Record<string, RuleCategory> = {
   naming: { rules: ['class-pascal-case', 'var-camel-case', 'const-upper-snake-case'], weight: 15 },
   function: { rules: ['function-length', 'param-count', 'cyclomatic-complexity'], weight: 25 },
@@ -263,13 +271,13 @@ function checkFunctionLength(content: string, filePath?: string): CodeIssue[] {
   const funcs = findFunctionBodies(content);
   for (const f of funcs) {
     const lineCount = f.bodyEnd - f.bodyStart + 1;
-    if (lineCount > 50) {
+    if (lineCount > MAX_FUNCTION_LENGTH) {
       const funcLine = content.split('\n')[f.startLine]?.trim() || 'anonymous';
       issues.push(
         makeIssue(
           'function-length',
           'major',
-          `函数 "${funcLine}" 有 ${lineCount} 行（超过 50 行限制）`,
+          `函数 "${funcLine}" 有 ${lineCount} 行（超过 ${MAX_FUNCTION_LENGTH} 行限制）`,
           filePath,
           f.startLine + 1,
         ),
@@ -291,13 +299,13 @@ function checkParamCount(content: string, filePath?: string): CodeIssue[] {
           .map((p) => p.trim())
           .filter(Boolean).length
       : 0;
-    if (count > 5) {
+    if (count > MAX_PARAMS) {
       const lineNum = content.slice(0, m.index).split('\n').length;
       issues.push(
         makeIssue(
           'param-count',
           'major',
-          `函数有 ${count} 个参数（超过 5 个限制）`,
+          `函数有 ${count} 个参数（超过 ${MAX_PARAMS} 个限制）`,
           filePath,
           lineNum,
         ),
@@ -313,13 +321,13 @@ function checkParamCount(content: string, filePath?: string): CodeIssue[] {
           .map((p) => p.trim())
           .filter(Boolean).length
       : 0;
-    if (count > 5) {
+    if (count > MAX_PARAMS) {
       const lineNum = content.slice(0, m.index).split('\n').length;
       issues.push(
         makeIssue(
           'param-count',
           'major',
-          `箭头函数有 ${count} 个参数（超过 5 个限制）`,
+          `箭头函数有 ${count} 个参数（超过 ${MAX_PARAMS} 个限制）`,
           filePath,
           lineNum,
         ),
@@ -356,13 +364,13 @@ function checkCyclomaticComplexity(content: string, filePath?: string): CodeIssu
         complexity++;
       }
     }
-    if (complexity > 10) {
+    if (complexity > MAX_CYCLOMATIC) {
       const funcLine = content.split('\n')[f.startLine]?.trim() || 'anonymous';
       issues.push(
         makeIssue(
           'cyclomatic-complexity',
           'major',
-          `函数 "${funcLine}" 圈复杂度为 ${complexity}（超过 10 限制）`,
+          `函数 "${funcLine}" 圈复杂度为 ${complexity}（超过 ${MAX_CYCLOMATIC} 限制）`,
           filePath,
           f.startLine + 1,
         ),
@@ -411,12 +419,12 @@ function checkClassLength(content: string, filePath?: string): CodeIssue[] {
   const classes = findClassBlocks(content);
   for (const c of classes) {
     const lineCount = c.endLine - c.startLine + 1;
-    if (lineCount > 500) {
+    if (lineCount > MAX_CLASS_LENGTH) {
       issues.push(
         makeIssue(
           'class-length',
           'major',
-          `类 "${c.name}" 有 ${lineCount} 行（超过 500 行限制）`,
+          `类 "${c.name}" 有 ${lineCount} 行（超过 ${MAX_CLASS_LENGTH} 行限制）`,
           filePath,
           c.startLine + 1,
         ),
@@ -438,9 +446,14 @@ function checkNestingDepth(content: string, filePath?: string): CodeIssue[] {
     }
     if (currentDepth > maxDepth) maxDepth = currentDepth;
   }
-  if (maxDepth > 4) {
+  if (maxDepth > MAX_NESTING_DEPTH) {
     issues.push(
-      makeIssue('nesting-depth', 'major', `代码嵌套深度为 ${maxDepth}（超过 4 层限制）`, filePath),
+      makeIssue(
+        'nesting-depth',
+        'major',
+        `代码嵌套深度为 ${maxDepth}（超过 ${MAX_NESTING_DEPTH} 层限制）`,
+        filePath,
+      ),
     );
   }
   return issues;
@@ -449,7 +462,7 @@ function checkNestingDepth(content: string, filePath?: string): CodeIssue[] {
 function checkDuplicateCode(content: string, filePath?: string): CodeIssue[] {
   const issues: CodeIssue[] = [];
   const lines = content.split('\n');
-  const minBlock = 5;
+  const minBlock = DUPLICATE_BLOCK_SIZE;
   const seen = new Map<string, number[]>();
   for (let i = 0; i <= lines.length - minBlock; i++) {
     const block = lines.slice(i, i + minBlock).join('\n');
@@ -605,7 +618,7 @@ function calculateScore(issues: CodeIssue[]): {
 
   const rawTotal = Object.values(categoryScores).reduce((s, v) => s + v, 0);
   const normalizedScore = Math.round((rawTotal / MAX_RAW) * 100);
-  const passed = normalizedScore >= 80 && !hasCritical;
+  const passed = normalizedScore >= PASS_SCORE && !hasCritical;
 
   return { score: normalizedScore, passed, categoryScores };
 }
@@ -737,13 +750,6 @@ export class CleanCodeChecker {
       issuesJson,
       'utf-8',
     );
-
-    const fixHistory: unknown[] = [];
-    await fs.promises.writeFile(
-      path.join(outputDir, 'clean-code-fix-history.json'),
-      JSON.stringify(fixHistory, null, 2),
-      'utf-8',
-    );
   }
 
   private generateMarkdownReport(result: CleanCodeResult): string {
@@ -798,11 +804,11 @@ export class CleanCodeChecker {
     lines.push('## 通过条件');
     lines.push('');
     if (result.passed) {
-      lines.push('✅ **通过**: 总分 ≥80 且无未修复的 critical 问题');
+      lines.push(`✅ **通过**: 总分 ≥${PASS_SCORE} 且无未修复的 critical 问题`);
     } else {
       const criticalCount = result.issues.filter((i) => i.severity === 'critical').length;
-      if (result.score < 80) {
-        lines.push(`❌ **未通过**: 总分 ${result.score} < 80`);
+      if (result.score < PASS_SCORE) {
+        lines.push(`❌ **未通过**: 总分 ${result.score} < ${PASS_SCORE}`);
       }
       if (criticalCount > 0) {
         lines.push(`❌ **未通过**: 存在 ${criticalCount} 个 critical 问题`);

@@ -1,3 +1,5 @@
+import type { Logger } from '../utils/logger.js';
+
 export interface ParsedSection {
   name: string;
   level: number;
@@ -318,7 +320,11 @@ function applyStrategy(parent: string, child: string, rule: InheritanceRule): st
   return sectionsToText(parentSections);
 }
 
-export function resolveChain(rules: InheritanceRule[], start: string): string[] {
+export function resolveChain(
+  rules: InheritanceRule[],
+  start: string,
+  logger?: Logger,
+): string[] {
   const childToParent = new Map<string, string>();
   const duplicates: string[] = [];
   for (const rule of rules) {
@@ -329,9 +335,12 @@ export function resolveChain(rules: InheritanceRule[], start: string): string[] 
     childToParent.set(rule.child, rule.parent);
   }
   if (duplicates.length > 0) {
-    console.warn(
-      `[driv] 检测到子模板 '${duplicates[0]}' 配置了多个不同父模板，使用最后一条规则`,
-    );
+    const msg = `[driv] 检测到子模板 '${duplicates[0]}' 配置了多个不同父模板，使用最后一条规则`;
+    if (logger) {
+      logger.warn(msg);
+    } else {
+      console.warn(msg);
+    }
   }
 
   const chain: string[] = [];

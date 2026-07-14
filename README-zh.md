@@ -35,7 +35,7 @@ OpenSpec 处理 **WHAT**（提案、spec 生命周期、归档）。
 
 Superpowers 处理 **HOW**（头脑风暴、技术设计、执行）。
 
-Driv 将二者串联为五阶段自动化流水线，支持可恢复状态机、阶段守护门禁、模板系统和质量评审门禁。
+Driv 将二者串联为五阶段自动化流水线，支持可恢复状态机、阶段守护门禁、模板系统、质量评审门禁，以及 ServiceContainer 依赖注入。
 
 ## 为什么需要 Driv
 
@@ -179,15 +179,16 @@ driv init
 
 | 阶段       | 命令               | 归属          | 产出物                                           |
 |-----------|-------------------|---------------|-------------------------------------------------|
-| 1. Clarify | `/driv-clarify`   | OpenSpec      | proposal.md、.openspec.yaml                         |
-| 2. Design  | `/driv-design`    | Superpowers   | design.md、handoff 包、技术评审                      |
+| 1. Clarify | `/driv-clarify`   | OpenSpec      | prd.md、.openspec.yaml、.driv.yaml                |
+| 2. Design  | `/driv-design`    | Superpowers   | proposal.md、design.md、tasks.md、specs/、handoff、技术评审 |
 | 3. Build   | `/driv-build`     | Superpowers   | Superpowers plan、代码提交、Clean Code 检查、代码评审 |
 | 4. Verify  | `/driv-verify`    | Both          | 验证报告、分支处理                                   |
 | 5. Archive | `/driv-archive`   | OpenSpec      | Delta Spec 合并、归档                               |
 
 ### 核心原则
 
-- **Clarify 不可跳过** — 每个变更必须先生成提案和 OpenSpec 元数据
+- **Clarify 不可跳过** — 每个变更必须先生成 PRD 并初始化状态文件
+- **Design 阶段生成全套 OpenSpec 交付件** — proposal.md、specs、tasks.md 基于 PRD + brainstorming 生成
 - **Design 阶段产生 handoff** — Hash 校验确保 artifact 一致性
 - **保持 tasks.md 同步** — 每完成一个任务就勾选
 - **频繁提交** — 每个任务一个 commit
@@ -235,6 +236,7 @@ phase: build
 created_at: 2026-06-28
 openspec:
   change_dir: openspec/changes/feature-user-auth
+  prd: openspec/changes/feature-user-auth/prd.md
   proposal: openspec/changes/feature-user-auth/proposal.md
   design: openspec/changes/feature-user-auth/design.md
   tasks: openspec/changes/feature-user-auth/tasks.md
@@ -242,12 +244,16 @@ phases:
   clarify:
     status: completed
     artifacts:
-      proposal: openspec/changes/feature-user-auth/proposal.md
+      prd: openspec/changes/feature-user-auth/prd.md
   design:
     status: completed
     artifacts:
+      proposal: openspec/changes/feature-user-auth/proposal.md
       design: openspec/changes/feature-user-auth/design.md
       tasks: openspec/changes/feature-user-auth/tasks.md
+      specs: openspec/changes/feature-user-auth/specs.json
+      design-converted: 'true'
+      detailed-design-completed: 'true'
   build:
     status: in_progress
     artifacts:
@@ -279,8 +285,8 @@ archived: false
 
 | 阶段退出   | 检查条件                                                           |
 |-----------|-------------------------------------------------------------------|
-| Clarify   | proposal.md 存在、.openspec.yaml 存在                              |
-| Design    | design.md 存在、handoff 有效、技术评审通过                           |
+| Clarify   | prd.md 存在、.openspec.yaml 存在、.driv.yaml 已初始化              |
+| Design    | proposal.md 存在、specs 已创建、tasks.md 存在、design-converted、handoff 有效、技术评审通过 |
 | Build     | plan 存在、模式已选择、代码已提交、测试通过、Clean Code 通过、代码评审通过 |
 | Verify    | 验证报告存在、分支已处理                                             |
 | Archive   | 变更已移动到归档、spec 已合并                                       |
@@ -294,6 +300,7 @@ archived: false
 | proposals | default、feature、bugfix、refactor、config、docs                 |
 | designs   | default、feature、architecture、interface、performance             |
 | specs     | default、capability、api、component、service                      |
+| prds      | default                                                          |
 | reviews   | requirement-review、technical-review、code-review                 |
 
 ### 4 层模板栈
@@ -431,7 +438,8 @@ your-project/
 │   │   └── <name>/
 │   │       ├── .driv.yaml           # 工作流状态
 │   │       ├── .driv/handoff/       # 交接包
-│   │       ├── proposal.md
+│   │       ├── prd.md               # 产品需求文档（Clarify 阶段）
+│   │       ├── proposal.md          # 变更提案（Design 阶段）
 │   │       ├── design.md
 │   │       ├── specs/<capability>/spec.md
 │   │       ├── tasks.md

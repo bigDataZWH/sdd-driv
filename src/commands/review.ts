@@ -1,12 +1,7 @@
 import * as path from 'path';
 import { select, checkbox } from '@inquirer/prompts';
-import { fileExists, readDir } from '../utils/file-system.js';
-import { ReviewSystemImpl } from '../core/review-system.js';
-import { FileSystem } from '../utils/file-system.js';
-import { TemplateManager } from '../core/template-manager.js';
-import { StateMachine } from '../core/state-machine.js';
-import { PathResolver } from '../core/path-resolver.js';
-import { YamlParser } from '../utils/yaml-parser.js';
+import { createServices } from '../core/service-container.js';
+import { listActiveChangeNames } from './helpers.js';
 import type { ReviewType, ReviewStatus, ChecklistResult } from '../core/review-system.js';
 
 export interface ReviewOptions {
@@ -21,28 +16,10 @@ const REVIEW_TYPES: Array<{ value: ReviewType; name: string; description: string
   { value: 'code', name: '代码评审', description: '检查代码质量、测试覆盖、安全漏洞' },
 ];
 
-async function getActiveChanges(projectPath: string): Promise<string[]> {
-  const changesDir = path.join(projectPath, 'openspec', 'changes');
-  if (!(await fileExists(changesDir))) return [];
-
-  const entries = await readDir(changesDir);
-  const changes: string[] = [];
-
-  for (const entry of entries) {
-    const changeDir = path.join(changesDir, entry);
-    const statePath = path.join(changeDir, '.driv.yaml');
-    if (await fileExists(statePath)) {
-      changes.push(entry);
-    }
-  }
-
-  return changes;
-}
-
 async function selectChange(projectPath: string, options: ReviewOptions): Promise<string> {
   if (options.change) return options.change;
 
-  const changes = await getActiveChanges(projectPath);
+  const changes = await listActiveChangeNames(projectPath);
   if (changes.length === 0) {
     throw new Error('No changes found. Create a change first with /driv command.');
   }
@@ -103,12 +80,7 @@ export async function reviewCommand(
   const changeName = await selectChange(projectPath, options);
   const reviewType = await selectReviewType(options);
 
-  const fs = new FileSystem(projectPath);
-  const pathResolver = new PathResolver(projectPath);
-  const yamlParser = new YamlParser(fs);
-  const templateManager = new TemplateManager(fs, projectPath);
-  const stateMachine = new StateMachine(fs, yamlParser, pathResolver);
-  const reviewSystem = new ReviewSystemImpl(fs, templateManager, stateMachine, pathResolver);
+  const { reviewSystem } = createServices(projectPath);
 
   if (!options.json) {
     log(`\n  Review: ${reviewType} review for ${changeName}\n`);

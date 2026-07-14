@@ -63,9 +63,9 @@ type ComponentPlan = {
   drivAction: ComponentAction;
 };
 
-function printBanner(log: (msg: string) => void): void {
+async function printBanner(log: (msg: string) => void): Promise<void> {
   log(`\n${DRIV_BANNER}\n`);
-  log(`  Version: ${getPackageVersion()}\n`);
+  log(`  Version: ${await getPackageVersion()}\n`);
 }
 
 function isInteractive(options: InitOptions): boolean {
@@ -165,19 +165,19 @@ function resolveAction(
   return 'install';
 }
 
-export async function initCommand(
-  projectPath: string,
-  _platformIds: string[],
-  options: InitOptions = {},
-): Promise<InitResult> {
-  const log = options.json ? () => undefined : console.log;
-  const targetPath = path.resolve(projectPath);
+interface Configuration {
+  scope: InstallScope;
+  language: typeof LANGUAGES[0];
+  selectedPlatformIds: string[];
+  selectedPlatforms: Platform[];
+  baseDir: string;
+}
 
-  if (!options.json) {
-    printBanner(log);
-    log(`  Setting up Driv in ${targetPath}\n`);
-  }
-
+async function selectConfiguration(
+  targetPath: string,
+  options: InitOptions,
+  log: (msg: string) => void,
+): Promise<Configuration> {
   const detected = await detectPlatforms(targetPath);
   const scope = await selectScope(options);
   const language = await selectLanguage(options);
@@ -191,9 +191,18 @@ export async function initCommand(
 
   const selectedPlatforms = PLATFORMS.filter((p) => selectedPlatformIds.includes(p.id));
   const baseDir = getBaseDir(scope, targetPath);
-  const createdDirs: string[] = [];
-  let templatesResult = { copied: 0, skipped: 0 };
 
+  return { scope, language, selectedPlatformIds, selectedPlatforms, baseDir };
+}
+
+async function installPlatforms(
+  platforms: Platform[],
+  baseDir: string,
+  scope: InstallScope,
+  selectedPlatformIds: string[],
+  options: InitOptions,
+  log: (msg: string) => void,
+): Promise<PlatformResult[]> {
   type PlatformPlan = ComponentPlan & {
     platform: Platform;
     hasDriv: boolean;
@@ -201,8 +210,8 @@ export async function initCommand(
 
   const plans: PlatformPlan[] = [];
 
-  for (const platform of selectedPlatforms) {
-    const hasDriv = await hasSkills(baseDir, platform, 'driv', selectedPlatforms, scope);
+  for (const platform of platforms) {
+    const hasDriv = await hasSkills(baseDir, platform, 'driv', platforms, scope);
     let drivAction = resolveAction(hasDriv, options);
 
     if (isInteractive(options)) {
@@ -223,24 +232,6 @@ export async function initCommand(
     }
 
     plans.push({ platform, drivAction, hasDriv });
-  }
-
-  if (scope === 'project') {
-    const drivDir = path.join(baseDir, '.driv');
-    await ensureDir(drivDir);
-    createdDirs.push(drivDir);
-
-    const templatesDir = path.join(drivDir, 'templates');
-    await ensureDir(templatesDir);
-    createdDirs.push(templatesDir);
-
-    templatesResult = await syncDrivAssets(baseDir, {
-      overwrite: options.overwrite ?? false,
-      skipExisting: options.skipExisting ?? (options.yes ? true : undefined),
-    });
-
-    await createWorkingDirs(targetPath);
-    createdDirs.push(path.join(targetPath, 'docs', 'superpowers', 'plans'));
   }
 
   const results: PlatformResult[] = [];
@@ -284,126 +275,229 @@ export async function initCommand(
     });
   }
 
-  let openspecStatus: InstallStatus = 'skipped';
-  if (scope === 'project') {
-    const openspecDir = path.join(targetPath, 'openspec');
-    const openspecConfigExists = await fileExists(path.join(openspecDir, 'config.yaml'));
-    if (!openspecConfigExists) {
-      if (!options.json && isInteractive(options)) {
-        const shouldInstallOpenSpec = await select({
-          message: 'Install OpenSpec for specification-driven development?',
-          choices: [
-            { name: 'Yes (creates openspec/ directory with config)', value: true },
-            { name: 'No', value: false },
-          ],
-        });
-        if (shouldInstallOpenSpec) {
-          log('\n  Installing OpenSpec...');
-          openspecStatus = await installOpenSpec(targetPath, selectedPlatformIds, scope);
-          if (openspecStatus === 'installed') {
-            log('  OpenSpec: installed -> openspec/');
-          } else if (openspecStatus === 'failed') {
-            log('  OpenSpec: failed (you can install manually with: npx @fission-ai/openspec init)');
-          }
-        }
-      } else {
-        // Non-interactive: auto-create minimal openspec config
-        await ensureDir(openspecDir);
-        await ensureDir(path.join(openspecDir, 'changes'));
-        await ensureDir(path.join(openspecDir, 'specs'));
-        await writeFile(
-          path.join(openspecDir, 'config.yaml'),
-          'profile: custom\ntools:\n  - opencode\n',
-        );
-        openspecStatus = 'installed';
-      }
-    } else {
-      openspecStatus = 'skipped';
-      log('  OpenSpec: already initialized');
-    }
+  return results;
+}
+
+async function installOpenSpecIfNeeded(
+  targetPath: string,
+  scope: InstallScope,
+  selectedPlatformIds: string[],
+  options: InitOptions,
+  log: (msg: string) => void,
+): Promise<InstallStatus> {
+  if (scope !== 'project') return 'skipped';
+
+  const openspecDir = path.join(targetPath, 'openspec');
+  const openspecConfigExists = await fileExists(path.join(openspecDir, 'config.yaml'));
+
+  if (openspecConfigExists) {
+    log('  OpenSpec: already initialized');
+    return 'skipped';
   }
 
-  let superpowersStatus: InstallStatus = 'skipped';
-  if (!options.json && isInteractive(options) && selectedPlatformIds.length > 0) {
-    const shouldInstallSuperpowers = await select({
-      message: 'Install Superpowers for enhanced AI workflows?',
+  if (!options.json && isInteractive(options)) {
+    const shouldInstallOpenSpec = await select({
+      message: 'Install OpenSpec for specification-driven development?',
       choices: [
-        { name: 'Yes (adds brainstorming, TDD, subagent development skills)', value: true },
+        { name: 'Yes (creates openspec/ directory with config)', value: true },
         { name: 'No', value: false },
       ],
     });
-
-    if (shouldInstallSuperpowers) {
-      log('\n  Installing Superpowers...');
-      superpowersStatus = await installSuperpowersForPlatforms(targetPath, scope, selectedPlatformIds);
-      if (superpowersStatus === 'installed') {
-        log('  Superpowers: installed');
-      } else if (superpowersStatus === 'failed') {
-        log('  Superpowers: failed to clone from GitHub');
-        log('  You can install manually: npx skills add obra/superpowers');
+    if (shouldInstallOpenSpec) {
+      log('\n  Installing OpenSpec...');
+      const openspecStatus = await installOpenSpec(targetPath, selectedPlatformIds, scope);
+      if (openspecStatus === 'installed') {
+        log('  OpenSpec: installed -> openspec/');
+      } else if (openspecStatus === 'failed') {
+        log('  OpenSpec: failed (you can install manually with: npx @fission-ai/openspec init)');
       }
+      return openspecStatus;
     }
+    return 'skipped';
   }
 
-  let codegraphStatus: InstallStatus = 'skipped';
-  if (!options.json && isInteractive(options)) {
-    const shouldInstallCodegraph =
-      options.yes ||
-      (await select({
-        message: 'Install CodeGraph for semantic code intelligence?',
-        choices: [
-          { name: 'Yes (recommended — saves ~16% cost · cuts ~58% tool calls)', value: true },
-          { name: 'No', value: false },
-        ],
-      }));
+  // Non-interactive: auto-create minimal openspec config
+  await ensureDir(openspecDir);
+  await ensureDir(path.join(openspecDir, 'changes'));
+  await ensureDir(path.join(openspecDir, 'specs'));
+  await writeFile(
+    path.join(openspecDir, 'config.yaml'),
+    'profile: custom\ntools:\n  - opencode\n',
+  );
+  return 'installed';
+}
 
-    if (shouldInstallCodegraph) {
-      log('\n  Installing CodeGraph...');
-      try {
-        const npmCmd = getNpmExecutable();
-        if (scope !== 'global') {
-          // Ensure package.json exists so npm doesn't walk up to drive root
-          const pkgJsonPath = path.join(targetPath, 'package.json');
-          if (!(await fileExists(pkgJsonPath))) {
-            await writeFile(
-              pkgJsonPath,
-              JSON.stringify(
-                {
-                  name: path.basename(targetPath).toLowerCase().replace(/[^a-z0-9-]/g, '-'),
-                  version: '1.0.0',
-                  private: true,
-                },
-                null,
-                2,
-              ) + '\n',
-            );
-          }
-        }
-        const args =
-          scope === 'global'
-            ? ['install', '-g', '@colbymchenry/codegraph']
-            : ['install', '--prefix', targetPath, '@colbymchenry/codegraph'];
-        const cwd = scope === 'global' ? os.homedir() : targetPath;
-        execFileSafe(npmCmd, args, {
-          cwd,
-          stdio: 'inherit',
-          timeout: 300_000,
-        });
-        codegraphStatus = 'installed';
-      } catch {
-        codegraphStatus = 'failed';
-        log('  CodeGraph: install failed');
-        log('  Try running your terminal as administrator, or install manually:');
-        log('    npm install -g @colbymchenry/codegraph');
-      }
-      log(`  CodeGraph: ${codegraphStatus}`);
-      for (const r of results) {
-        r.codegraph = codegraphStatus;
-      }
-    } else {
-      log('\n  CodeGraph: skipped');
-    }
+async function installSuperpowersIfNeeded(
+  targetPath: string,
+  scope: InstallScope,
+  selectedPlatformIds: string[],
+  options: InitOptions,
+  log: (msg: string) => void,
+): Promise<InstallStatus> {
+  if (options.json || !isInteractive(options) || selectedPlatformIds.length === 0) {
+    return 'skipped';
   }
+
+  const shouldInstallSuperpowers = await select({
+    message: 'Install Superpowers for enhanced AI workflows?',
+    choices: [
+      { name: 'Yes (adds brainstorming, TDD, subagent development skills)', value: true },
+      { name: 'No', value: false },
+    ],
+  });
+
+  if (!shouldInstallSuperpowers) return 'skipped';
+
+  log('\n  Installing Superpowers...');
+  const superpowersStatus = await installSuperpowersForPlatforms(targetPath, scope, selectedPlatformIds);
+  if (superpowersStatus === 'installed') {
+    log('  Superpowers: installed');
+  } else if (superpowersStatus === 'failed') {
+    log('  Superpowers: failed to clone from GitHub');
+    log('  You can install manually: npx skills add obra/superpowers');
+  }
+  return superpowersStatus;
+}
+
+async function installCodegraphIfNeeded(
+  scope: InstallScope,
+  targetPath: string,
+  results: PlatformResult[],
+  options: InitOptions,
+  log: (msg: string) => void,
+): Promise<InstallStatus> {
+  if (options.json || !isInteractive(options)) return 'skipped';
+
+  const shouldInstallCodegraph =
+    options.yes ||
+    (await select({
+      message: 'Install CodeGraph for semantic code intelligence?',
+      choices: [
+        { name: 'Yes (recommended — saves ~16% cost · cuts ~58% tool calls)', value: true },
+        { name: 'No', value: false },
+      ],
+    }));
+
+  if (!shouldInstallCodegraph) {
+    log('\n  CodeGraph: skipped');
+    return 'skipped';
+  }
+
+  log('\n  Installing CodeGraph...');
+  let codegraphStatus: InstallStatus;
+  try {
+    const npmCmd = getNpmExecutable();
+    if (scope !== 'global') {
+      // Ensure package.json exists so npm doesn't walk up to drive root
+      const pkgJsonPath = path.join(targetPath, 'package.json');
+      if (!(await fileExists(pkgJsonPath))) {
+        await writeFile(
+          pkgJsonPath,
+          JSON.stringify(
+            {
+              name: path.basename(targetPath).toLowerCase().replace(/[^a-z0-9-]/g, '-'),
+              version: '1.0.0',
+              private: true,
+            },
+            null,
+            2,
+          ) + '\n',
+        );
+      }
+    }
+    const args =
+      scope === 'global'
+        ? ['install', '-g', '@colbymchenry/codegraph']
+        : ['install', '--prefix', targetPath, '@colbymchenry/codegraph'];
+    const cwd = scope === 'global' ? os.homedir() : targetPath;
+    await execFileSafe(npmCmd, args, {
+      cwd,
+      stdio: 'inherit',
+      timeout: 300_000,
+    });
+    codegraphStatus = 'installed';
+  } catch {
+    codegraphStatus = 'failed';
+    log('  CodeGraph: install failed');
+    log('  Try running your terminal as administrator, or install manually:');
+    log('    npm install -g @colbymchenry/codegraph');
+  }
+  log(`  CodeGraph: ${codegraphStatus}`);
+  for (const r of results) {
+    r.codegraph = codegraphStatus;
+  }
+  return codegraphStatus;
+}
+
+export async function initCommand(
+  projectPath: string,
+  _platformIds: string[],
+  options: InitOptions = {},
+): Promise<InitResult> {
+  const log = options.json ? () => undefined : console.log;
+  const targetPath = path.resolve(projectPath);
+
+  if (!options.json) {
+    await printBanner(log);
+    log(`  Setting up Driv in ${targetPath}\n`);
+  }
+
+  const { scope, language, selectedPlatformIds, selectedPlatforms, baseDir } =
+    await selectConfiguration(targetPath, options, log);
+
+  const createdDirs: string[] = [];
+  let templatesResult = { copied: 0, skipped: 0 };
+
+  if (scope === 'project') {
+    const drivDir = path.join(baseDir, '.driv');
+    await ensureDir(drivDir);
+    createdDirs.push(drivDir);
+
+    const templatesDir = path.join(drivDir, 'templates');
+    await ensureDir(templatesDir);
+    createdDirs.push(templatesDir);
+
+    templatesResult = await syncDrivAssets(baseDir, {
+      overwrite: options.overwrite ?? false,
+      skipExisting: options.skipExisting ?? (options.yes ? true : undefined),
+    });
+
+    await createWorkingDirs(targetPath);
+    createdDirs.push(path.join(targetPath, 'docs', 'superpowers', 'plans'));
+  }
+
+  const results = await installPlatforms(
+    selectedPlatforms,
+    baseDir,
+    scope,
+    selectedPlatformIds,
+    options,
+    log,
+  );
+
+  const openspecStatus = await installOpenSpecIfNeeded(
+    targetPath,
+    scope,
+    selectedPlatformIds,
+    options,
+    log,
+  );
+
+  const superpowersStatus = await installSuperpowersIfNeeded(
+    targetPath,
+    scope,
+    selectedPlatformIds,
+    options,
+    log,
+  );
+
+  const codegraphStatus = await installCodegraphIfNeeded(
+    scope,
+    targetPath,
+    results,
+    options,
+    log,
+  );
 
   if (options.json) {
     const jsonResult = {

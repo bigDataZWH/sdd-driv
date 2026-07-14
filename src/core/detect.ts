@@ -36,7 +36,8 @@ async function hasPluginSuperpowers(): Promise<boolean> {
         }
       }
     }
-  } catch {
+  } catch (err) {
+    console.warn(`[driv] detect: failed to detect plugin superpowers: ${(err as Error).message}`);
   }
   return false;
 }
@@ -63,7 +64,8 @@ async function hasOpenCodePluginSuperpowers(): Promise<boolean> {
           return true;
         }
       }
-    } catch {
+    } catch (err) {
+      console.debug(`[driv] detect: failed to read opencode plugin config: ${(err as Error).message}`);
     }
   }
 

@@ -86,7 +86,7 @@ export interface DispatchReport {
 }
 
 /** Build 编排器 - 生成 subagent 调度计划 */
-export class BuildOrchestrator {
+export class DispatchPlanBuilder {
   constructor(
     private readonly changeName: string,
     private readonly sourcePaths: string[],
@@ -211,7 +211,7 @@ export class ArchiveReportService {
 }
 
 /** 阶段门禁 - 控制阶段间转换 */
-export class PhaseGuard {
+export class DispatchPhaseGuard {
   private static readonly PHASE_ORDER: DrivPhase[] = [
     'clarify',
     'design',
@@ -240,7 +240,7 @@ export class PhaseGuard {
     to: DrivPhase,
     report?: DispatchReport,
   ): { allowed: boolean; reason?: string } {
-    const transitions = PhaseGuard.PHASE_TRANSITIONS.get(from);
+    const transitions = DispatchPhaseGuard.PHASE_TRANSITIONS.get(from);
     if (!transitions || transitions.length === 0) {
       return { allowed: false, reason: `阶段 ${from} 无后续阶段` };
     }
@@ -271,3 +271,7 @@ export class PhaseGuard {
     return { allowed: true };
   }
 }
+
+// 向后兼容的别名：保留旧名称导出，避免外部依赖中断
+export { DispatchPlanBuilder as BuildOrchestrator };
+export { DispatchPhaseGuard as PhaseGuard };

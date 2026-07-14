@@ -230,6 +230,7 @@ describe('VerifyService', () => {
     ): Promise<string> {
       const changeDir = path.join(tmpDir, 'openspec', 'changes', changeName);
       fs.mkdirSync(changeDir, { recursive: true });
+      fs.mkdirSync(path.join(tmpDir, 'src'), { recursive: true });
       fs.writeFileSync(path.join(changeDir, 'tasks.md'), '- [ ] Task 1\n', 'utf-8');
       const configDir = path.join(changeDir, '.driv');
       fs.mkdirSync(configDir, { recursive: true });
@@ -377,6 +378,7 @@ describe('VerifyService', () => {
     async function setupPassingChange(changeName: string): Promise<string> {
       const changeDir = path.join(tmpDir, 'openspec', 'changes', changeName);
       fs.mkdirSync(changeDir, { recursive: true });
+      fs.mkdirSync(path.join(tmpDir, 'src'), { recursive: true });
       // 使用 3 个任务让 assessScale 返回 'full'，使覆盖率检查生效
       fs.writeFileSync(
         path.join(changeDir, 'tasks.md'),
@@ -447,12 +449,12 @@ describe('VerifyService', () => {
         expect(result.passed).toBe(false);
       });
 
-      it('coverage 文件不存在 → coveragePassed=true（向后兼容）, coverageSummary undefined', async () => {
+      it('coverage 文件不存在 → coveragePassed=false, coverageSummary undefined', async () => {
         await setupPassingChange('cov-missing');
 
         const result = await verifyService.verify('cov-missing');
 
-        expect(result.coveragePassed).toBe(true);
+        expect(result.coveragePassed).toBe(false);
         expect(result.coverageSummary).toBeUndefined();
       });
 
@@ -461,6 +463,7 @@ describe('VerifyService', () => {
         const changeName = 'cov-light-skip';
         const changeDir = path.join(tmpDir, 'openspec', 'changes', changeName);
         fs.mkdirSync(changeDir, { recursive: true });
+        fs.mkdirSync(path.join(tmpDir, 'src'), { recursive: true });
         fs.writeFileSync(path.join(changeDir, 'tasks.md'), '- [ ] Task 1\n', 'utf-8');
         const configDir = path.join(changeDir, '.driv');
         fs.mkdirSync(configDir, { recursive: true });

@@ -51,16 +51,14 @@ describe('Review 类型与配置 (1.1-1.4)', () => {
       expect(info.severity).toBe('info');
     });
 
-    it('ChecklistItem 包含 check/passed/detail/autoCheck', async () => {
+    it('ChecklistItem 包含 name/description/autoCheck 和可选 passed/detail', async () => {
       const item = {
-        check: '代码符合规范',
-        passed: false,
-        detail: '待检查',
+        name: '代码符合规范',
+        description: '代码符合规范检查',
         autoCheck: false,
       };
-      expect(item.check).toBe('代码符合规范');
-      expect(item.passed).toBe(false);
-      expect(item.detail).toBe('待检查');
+      expect(item.name).toBe('代码符合规范');
+      expect(item.description).toBe('代码符合规范检查');
       expect(item.autoCheck).toBe(false);
     });
 

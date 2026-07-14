@@ -21,8 +21,8 @@ export class ContextRecovery {
     };
   }
 
-  validateHandoff(_handoffData: unknown): boolean {
-    if (!_handoffData) return false;
-    return true;
+  validateHandoff(handoffData: unknown): boolean {
+    if (!handoffData || typeof handoffData !== 'object') return false;
+    return Array.isArray((handoffData as { sources?: unknown }).sources);
   }
 }

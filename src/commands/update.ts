@@ -231,7 +231,7 @@ export async function updateCommand(
 
   if (!options.json) {
     log(`\n  Driv Update`);
-    log(`  Version: ${getPackageVersion()}\n`);
+    log(`  Version: ${await getPackageVersion()}\n`);
   }
 
   let npmStatus: 'updated' | 'failed' | 'skipped' = 'skipped';

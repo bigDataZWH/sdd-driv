@@ -2,8 +2,7 @@ import { Phase, ChangeState } from './types.js';
 import { DirtyWorktreeChecker } from './dirty-worktree.js';
 import { HandoffManager } from './handoff-manager.js';
 import { FileSystem } from '../utils/file-system.js';
-import { SchemaRegistry } from './schema-registry.js';
-import { validateEARS } from './ears-validator.js';
+import type { SchemaRegistry } from './schema-registry.js';
 import type { TemplateManager } from './template-manager.js';
 import * as path from 'path';
 
@@ -24,6 +23,11 @@ export interface GuardResult {
   failures: GuardFailure[];
 }
 
+export interface StateMachineLike {
+  transition(changeName: string, toPhase: string): Promise<void>;
+  setField(changeName: string, field: string, value: unknown): Promise<void>;
+}
+
 export interface PhaseGuard {
   checkEntry(phase: Phase, state: ChangeState): Promise<GuardResult>;
   checkExit(phase: Phase, state: ChangeState): Promise<GuardResult>;
@@ -31,7 +35,7 @@ export interface PhaseGuard {
     from: Phase,
     to: Phase,
     state: ChangeState,
-    stateMachine: any,
+    stateMachine: StateMachineLike,
   ): Promise<GuardResult>;
 }
 
@@ -306,7 +310,7 @@ export class PhaseGuardImpl implements PhaseGuard {
     from: Phase,
     to: Phase,
     state: ChangeState,
-    stateMachine: any,
+    stateMachine: StateMachineLike,
   ): Promise<GuardResult> {
     const guardResult = await this.checkExit(from, state);
     if (!guardResult.passed) {
@@ -324,6 +328,14 @@ export class PhaseGuardImpl implements PhaseGuard {
   private async checkClarifyExit(state: ChangeState): Promise<GuardResult> {
     const failures: GuardFailure[] = [];
 
+    this.checkPrdExists(state, failures);
+    this.checkClarifyStatus(state, failures);
+    await this.checkPrdSections(state, failures);
+
+    return buildResult('clarify', 'exit', failures);
+  }
+
+  private checkPrdExists(state: ChangeState, failures: GuardFailure[]): void {
     if (!state.openspec.prd) {
       failures.push(
         fail(
@@ -335,7 +347,9 @@ export class PhaseGuardImpl implements PhaseGuard {
         ),
       );
     }
+  }
 
+  private checkClarifyStatus(state: ChangeState, failures: GuardFailure[]): void {
     if (state.phases.clarify.status !== 'completed') {
       failures.push(
         fail(
@@ -347,7 +361,9 @@ export class PhaseGuardImpl implements PhaseGuard {
         ),
       );
     }
+  }
 
+  private async checkPrdSections(state: ChangeState, failures: GuardFailure[]): Promise<void> {
     // advisory: PRD 章节结构校验（best-effort，不阻断）
     if (state.openspec.prd && this.templateManager && this.fs) {
       try {
@@ -376,96 +392,18 @@ export class PhaseGuardImpl implements PhaseGuard {
         // best-effort，校验失败静默跳过
       }
     }
-
-    return buildResult('clarify', 'exit', failures);
   }
 
   private checkDesignExit(state: ChangeState): GuardResult {
     const failures: GuardFailure[] = [];
 
-    if (!state.openspec.proposal) {
-      failures.push(
-        fail(
-          'proposal_exists',
-          'proposal 路径已设置',
-          '未设置',
-          'error',
-          '提案文件路径未设置，请先创建 proposal.md',
-        ),
-      );
-    }
-
-    if (!state.openspec.design) {
-      failures.push(
-        fail(
-          'design_doc_exists',
-          'design 路径已设置',
-          '未设置',
-          'error',
-          '设计文档路径未设置，请先创建 design.md',
-        ),
-      );
-    }
-
-    if (!state.openspec.specs || state.openspec.specs.length === 0) {
-      failures.push(
-        fail(
-          'specs_created',
-          'specs 数组已设置且不为空',
-          state.openspec.specs ? '空数组' : '未设置',
-          'error',
-          'specs 为空数组，请先创建 specs',
-        ),
-      );
-    }
-
-    if (!state.openspec.tasks) {
-      failures.push(
-        fail(
-          'tasks_exists',
-          'tasks 路径已设置',
-          '未设置',
-          'error',
-          'tasks 未设置，请先创建 tasks.md',
-        ),
-      );
-    }
-
-    if (state.phases.design.artifacts['design-converted'] !== 'true') {
-      failures.push(
-        fail(
-          'design_converted',
-          'design-converted 为 true',
-          state.phases.design.artifacts['design-converted'] || '未设置',
-          'error',
-          '设计转换未完成，请先完成 design 转换',
-        ),
-      );
-    }
-
-    if (state.phases.design.artifacts['detailed-design-completed'] !== 'true') {
-      failures.push(
-        fail(
-          'detailed_design_completed',
-          'detailed-design-completed 为 true',
-          state.phases.design.artifacts['detailed-design-completed'] || '未设置',
-          'error',
-          '详细设计未完成，请先完成详细设计',
-        ),
-      );
-    }
-
-    if (state.phases.design.status !== 'completed') {
-      failures.push(
-        fail(
-          'design_doc_complete',
-          'design 阶段状态为 completed',
-          state.phases.design.status,
-          'error',
-          '设计文档未完成，请先完成 design 阶段',
-        ),
-      );
-    }
+    this.checkDesignProposal(state, failures);
+    this.checkDesignDoc(state, failures);
+    this.checkDesignSpecs(state, failures);
+    this.checkDesignTasks(state, failures);
+    this.checkDesignConverted(state, failures);
+    this.checkDetailedDesign(state, failures);
+    this.checkDesignStatus(state, failures);
 
     if (!state.phases.design.artifacts.handoff) {
       failures.push(
@@ -504,6 +442,104 @@ export class PhaseGuardImpl implements PhaseGuard {
     }
 
     return buildResult('design', 'exit', failures);
+  }
+
+  private checkDesignProposal(state: ChangeState, failures: GuardFailure[]): void {
+    if (!state.openspec.proposal) {
+      failures.push(
+        fail(
+          'proposal_exists',
+          'proposal 路径已设置',
+          '未设置',
+          'error',
+          '提案文件路径未设置，请先创建 proposal.md',
+        ),
+      );
+    }
+  }
+
+  private checkDesignDoc(state: ChangeState, failures: GuardFailure[]): void {
+    if (!state.openspec.design) {
+      failures.push(
+        fail(
+          'design_doc_exists',
+          'design 路径已设置',
+          '未设置',
+          'error',
+          '设计文档路径未设置，请先创建 design.md',
+        ),
+      );
+    }
+  }
+
+  private checkDesignSpecs(state: ChangeState, failures: GuardFailure[]): void {
+    if (!state.openspec.specs || state.openspec.specs.length === 0) {
+      failures.push(
+        fail(
+          'specs_created',
+          'specs 数组已设置且不为空',
+          state.openspec.specs ? '空数组' : '未设置',
+          'error',
+          'specs 为空数组，请先创建 specs',
+        ),
+      );
+    }
+  }
+
+  private checkDesignTasks(state: ChangeState, failures: GuardFailure[]): void {
+    if (!state.openspec.tasks) {
+      failures.push(
+        fail(
+          'tasks_exists',
+          'tasks 路径已设置',
+          '未设置',
+          'error',
+          'tasks 未设置，请先创建 tasks.md',
+        ),
+      );
+    }
+  }
+
+  private checkDesignConverted(state: ChangeState, failures: GuardFailure[]): void {
+    if (state.phases.design.artifacts['design-converted'] !== 'true') {
+      failures.push(
+        fail(
+          'design_converted',
+          'design-converted 为 true',
+          state.phases.design.artifacts['design-converted'] || '未设置',
+          'error',
+          '设计转换未完成，请先完成 design 转换',
+        ),
+      );
+    }
+  }
+
+  private checkDetailedDesign(state: ChangeState, failures: GuardFailure[]): void {
+    if (state.phases.design.artifacts['detailed-design-completed'] !== 'true') {
+      failures.push(
+        fail(
+          'detailed_design_completed',
+          'detailed-design-completed 为 true',
+          state.phases.design.artifacts['detailed-design-completed'] || '未设置',
+          'error',
+          '详细设计未完成，请先完成详细设计',
+        ),
+      );
+    }
+  }
+
+  private checkDesignStatus(state: ChangeState, failures: GuardFailure[]): void {
+    if (state.phases.design.status !== 'completed') {
+      failures.push(
+        fail(
+          'design_doc_complete',
+          'design 阶段状态为 completed',
+          state.phases.design.status,
+          'error',
+          '设计文档未完成，请先完成 design 阶段',
+        ),
+      );
+    }
   }
 
   private checkBuildExit(state: ChangeState): GuardResult {

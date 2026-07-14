@@ -332,7 +332,7 @@ describe('ReviewSystem', () => {
   // ── checkStatus (2.4) ──
 
   it('checkStatus 返回当前评审状态', async () => {
-    const { reviewSys, resolver } = await setup();
+    const { reviewSys, resolver, sm } = await setup();
 
     // Initially pending
     const initial = await reviewSys.checkStatus('test-change', 'requirement');
@@ -345,6 +345,7 @@ describe('ReviewSystem', () => {
     const data = parse(raw);
     data.hwProcess.requirementReview = 'passed';
     fs.writeFileSync(statePath, stringify(data, { lineWidth: 120 }), 'utf-8');
+    sm.clearCache('test-change');
 
     const updated = await reviewSys.checkStatus('test-change', 'requirement');
     expect(updated).toBe('passed');

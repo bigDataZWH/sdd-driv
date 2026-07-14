@@ -1,10 +1,15 @@
 import * as path from 'path';
-import * as fs from 'fs';
-import { FileSystem } from '../utils/file-system.js';
+import { FileSystem, walkDir } from '../utils/file-system.js';
 import { StateMachine } from './state-machine.js';
 import { CleanCodeChecker } from './clean-code-checker.js';
 import { ScriptExec } from '../utils/script-exec.js';
 import { DebugGate, DebugGateResult } from './debug-gate.js';
+
+const COVERAGE_PASS_THRESHOLD = 80;
+const COVERAGE_WARN_THRESHOLD = 70;
+const SCALE_FULL_TASKS = 3;
+const SCALE_FULL_FILES = 4;
+const SCALE_LIGHT_FILES = 3;
 
 export type VerifyScale = 'light' | 'full';
 
@@ -30,25 +35,6 @@ export interface VerifyResult {
   typeCheckPassed?: boolean;
 }
 
-async function walkDir(dir: string): Promise<string[]> {
-  const files: string[] = [];
-  let entries: fs.Dirent[];
-  try {
-    entries = await fs.promises.readdir(dir, { withFileTypes: true });
-  } catch {
-    return files;
-  }
-  for (const entry of entries) {
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...(await walkDir(fullPath)));
-    } else {
-      files.push(fullPath);
-    }
-  }
-  return files;
-}
-
 export class VerifyService {
   private fs: FileSystem;
   private stateMachine: StateMachine;
@@ -56,6 +42,7 @@ export class VerifyService {
   private scriptExec: ScriptExec;
   private root: string;
   private debugGate: DebugGate;
+  private configCache: { data: any; mtime: number } | null = null;
 
   constructor(
     fs: FileSystem,
@@ -79,7 +66,8 @@ export class VerifyService {
     try {
       const tasksContent = await this.fs.readFile(tasksPath);
       tasks = tasksContent.split('\n').filter((l) => l.includes('- [ ]'));
-    } catch {
+    } catch (err) {
+      console.warn(`[driv] verify: failed to read tasks: ${(err as Error).message}`);
       tasks = [];
     }
 
@@ -88,7 +76,8 @@ export class VerifyService {
     try {
       const entries = await this.fs.listDir(changeDir);
       fileCount = entries.length;
-    } catch {
+    } catch (err) {
+      console.warn(`[driv] verify: failed to list change dir: ${(err as Error).message}`);
       fileCount = 0;
     }
 
@@ -102,11 +91,12 @@ export class VerifyService {
           specCount++;
         }
       }
-    } catch {
+    } catch (err) {
+      console.warn(`[driv] verify: failed to count specs: ${(err as Error).message}`);
       specCount = 0;
     }
 
-    if (tasks.length >= 3 || fileCount >= 4 || specCount >= 2) {
+    if (tasks.length >= SCALE_FULL_TASKS || fileCount >= SCALE_FULL_FILES || specCount >= 2) {
       return 'full';
     }
     return 'light';
@@ -122,14 +112,22 @@ export class VerifyService {
       'config.yaml',
     );
     try {
+      const stat = await this.fs.stat(configPath);
+      const mtime = stat.mtimeMs;
+      if (this.configCache && this.configCache.mtime === mtime) {
+        return this.configCache.data;
+      }
       const content = await this.fs.readFile(configPath);
       const { parse } = await import('yaml');
       const config = parse(content) as Record<string, unknown>;
-      return {
+      const data = {
         buildCmd: String(config?.buildCmd ?? 'npm run build'),
         testCmd: String(config?.testCmd ?? 'npm test'),
       };
-    } catch {
+      this.configCache = { data, mtime };
+      return data;
+    } catch (err) {
+      console.warn(`[driv] verify: failed to read config: ${(err as Error).message}`);
       return { buildCmd: 'npm run build', testCmd: 'npm test' };
     }
   }
@@ -150,7 +148,7 @@ export class VerifyService {
   }> {
     try {
       const coveragePath = path.join(this.root, 'coverage', 'coverage-summary.json');
-      const content = await fs.promises.readFile(coveragePath, 'utf-8');
+      const content = await this.fs.readFile(coveragePath);
       const data = JSON.parse(content);
       // coverage-summary.json 格式：{ total: { lines: { pct: 80 }, functions: { pct: 82 }, branches: { pct: 70 }, statements: { pct: 80 } } }
       const total = data.total;
@@ -162,14 +160,14 @@ export class VerifyService {
         statements: total.statements?.pct ?? 0,
       };
       const passed =
-        summary.lines >= 80 &&
-        summary.functions >= 80 &&
-        summary.branches >= 70 &&
-        summary.statements >= 80;
+        summary.lines >= COVERAGE_PASS_THRESHOLD &&
+        summary.functions >= COVERAGE_PASS_THRESHOLD &&
+        summary.branches >= COVERAGE_WARN_THRESHOLD &&
+        summary.statements >= COVERAGE_PASS_THRESHOLD;
       return { passed, summary };
-    } catch {
-      // coverage 文件不存在，向后兼容
-      return { passed: true };
+    } catch (err) {
+      console.warn(`[driv] verify: failed to read coverage: ${(err as Error).message}`);
+      return { passed: false };
     }
   }
 
@@ -184,8 +182,9 @@ export class VerifyService {
         return true; // 无 lint script，向后兼容
       }
       return this.runCommand('npm run lint');
-    } catch {
-      return true; // 读取失败，向后兼容
+    } catch (err) {
+      console.warn(`[driv] verify: failed to read lint script: ${(err as Error).message}`);
+      return false;
     }
   }
 
@@ -225,7 +224,8 @@ export class VerifyService {
     try {
       const result = await this.scriptExec.exec(command, args, { cwd: this.root });
       return result.exitCode === 0;
-    } catch {
+    } catch (err) {
+      console.warn(`[driv] verify: failed to run command: ${(err as Error).message}`);
       return false;
     }
   }
@@ -242,7 +242,7 @@ export class VerifyService {
       const files = await walkDir(srcDir);
       for (const file of files) {
         if (file.endsWith('.ts')) {
-          const content = await fs.promises.readFile(file, 'utf-8');
+          const content = await this.fs.readFile(file);
           const result = await this.cleanCodeChecker.check(content, file);
           if (!result.passed) {
             cleanCodePassed = false;
@@ -250,8 +250,9 @@ export class VerifyService {
           }
         }
       }
-    } catch {
-      cleanCodePassed = true;
+    } catch (err) {
+      console.warn(`[driv] verify: failed to check clean code: ${(err as Error).message}`);
+      cleanCodePassed = false;
     }
 
     // 覆盖率收集（light 模式跳过 coverage 检查）

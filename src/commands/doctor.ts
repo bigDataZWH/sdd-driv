@@ -145,7 +145,7 @@ async function checkVersion(): Promise<DoctorResult> {
   return {
     check: 'driv package',
     status: 'pass',
-    message: `v${getPackageVersion()}`,
+    message: `v${await getPackageVersion()}`,
   };
 }
 

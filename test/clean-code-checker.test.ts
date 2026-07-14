@@ -419,18 +419,6 @@ export function run() {
       expect(Array.isArray(content)).toBe(true);
       expect(content.length).toBeGreaterThan(0);
     });
-
-    it('应生成 clean-code-fix-history.json', async () => {
-      const { CleanCodeChecker } = await import('../src/core/clean-code-checker.js');
-      const checker = new CleanCodeChecker();
-      const result = await checker.check('class ok {}');
-      await checker.generateReports(result, tempDir);
-
-      const histPath = path.join(tempDir, 'clean-code-fix-history.json');
-      expect(existsSync(histPath)).toBe(true);
-      const content = JSON.parse(readFileSync(histPath, 'utf-8'));
-      expect(Array.isArray(content)).toBe(true);
-    });
   });
 
   describe('4.6 - 写入 .driv.yaml.phases.build', () => {

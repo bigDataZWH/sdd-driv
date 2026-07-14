@@ -57,6 +57,44 @@ export class FileSystem {
     const content = await this.readFile(filePath);
     return JSON.parse(content) as T;
   }
+
+  async stat(filePath: string): Promise<fs.Stats> {
+    const resolved = path.resolve(filePath);
+    if (!isWithinRoot(resolved, this.root)) {
+      throw new Error(`Path ${resolved} is outside project root ${this.root}`);
+    }
+    return fs.promises.stat(resolved);
+  }
+
+  async rm(
+    target: string,
+    options?: { recursive?: boolean; force?: boolean },
+  ): Promise<void> {
+    const resolved = path.resolve(target);
+    if (!isWithinRoot(resolved, this.root)) {
+      throw new Error(`Path ${resolved} is outside project root ${this.root}`);
+    }
+    await fs.promises.rm(resolved, options);
+  }
+
+  async unlink(filePath: string): Promise<void> {
+    const resolved = path.resolve(filePath);
+    if (!isWithinRoot(resolved, this.root)) {
+      throw new Error(`Path ${resolved} is outside project root ${this.root}`);
+    }
+    await fs.promises.unlink(resolved);
+  }
+
+  async mkdir(
+    dir: string,
+    options?: { recursive?: boolean },
+  ): Promise<void> {
+    const resolved = path.resolve(dir);
+    if (!isWithinRoot(resolved, this.root)) {
+      throw new Error(`Path ${resolved} is outside project root ${this.root}`);
+    }
+    await fs.promises.mkdir(resolved, options);
+  }
 }
 
 export async function fileExists(filePath: string): Promise<boolean> {
@@ -80,6 +118,27 @@ export async function writeFile(filePath: string, content: string): Promise<void
 export async function readDir(dir: string): Promise<string[]> {
   const entries = await fs.promises.readdir(dir, { withFileTypes: true });
   return entries.map((e) => e.name);
+}
+
+export async function walkDir(dir: string): Promise<string[]> {
+  let entries: string[];
+  try {
+    entries = await readDir(dir);
+  } catch {
+    // 目录不存在时返回空列表（与历史行为一致：无可遍历内容）
+    return [];
+  }
+  const results = await Promise.all(
+    entries.map(async (entry) => {
+      const fullPath = path.join(dir, entry);
+      const stat = await fs.promises.stat(fullPath);
+      if (stat.isDirectory()) {
+        return walkDir(fullPath);
+      }
+      return [fullPath];
+    }),
+  );
+  return results.flat();
 }
 
 export async function readJson<T = unknown>(filePath: string): Promise<T> {

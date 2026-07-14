@@ -1,4 +1,7 @@
 import { execFileSafe } from './openspec.js';
+import { getNpxExecutable } from '../utils/platform.js';
+
+export { getNpxExecutable };
 
 const SKILLS_AGENT_MAP: Record<string, string | null> = {
   opencode: 'opencode',
@@ -9,10 +12,6 @@ function getAgentNames(platformIds: string[]): string[] {
     .map((id) => SKILLS_AGENT_MAP[id])
     .filter((name): name is string => Boolean(name));
   return [...new Set(names)];
-}
-
-export function getNpxExecutable(platform: NodeJS.Platform = process.platform): string {
-  return platform === 'win32' ? 'npx.cmd' : 'npx';
 }
 
 export function buildSuperpowersInstallCommand(
@@ -42,7 +41,7 @@ export async function installSuperpowersForPlatforms(
 
   const command = buildSuperpowersInstallCommand(projectPath, scope, platformIds);
   try {
-    execFileSafe(command.command, command.args, {
+    await execFileSafe(command.command, command.args, {
       cwd: projectPath,
       stdio: 'inherit',
       timeout: 300_000,

@@ -1,36 +1,29 @@
 import * as path from 'path';
-import * as fs from 'fs';
-import { FileSystem } from '../utils/file-system.js';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import { FileSystem, walkDir } from '../utils/file-system.js';
 import { TemplateManager } from './template-manager.js';
 import { StateMachine } from './state-machine.js';
 import { PathResolver } from './path-resolver.js';
 import { CleanCodeChecker } from './clean-code-checker.js';
 import { CHECKLIST_DEFS } from './review-types.js';
+import type {
+  ReviewType,
+  ReviewStatus,
+  ReviewInfo,
+  ChecklistItem,
+  ChecklistResult,
+} from './review-types.js';
 
-export type ReviewType = 'requirement' | 'technical' | 'code';
-export type ReviewStatus = 'pending' | 'passed' | 'failed';
+export type {
+  ReviewType,
+  ReviewStatus,
+  ReviewInfo,
+  ChecklistItem,
+  ChecklistResult,
+} from './review-types.js';
 
-export interface ReviewInfo {
-  type: ReviewType;
-  path: string;
-  status: ReviewStatus;
-  createdAt: string;
-}
-
-export interface ChecklistItem {
-  name: string;
-  description: string;
-  autoCheck: boolean;
-  passed?: boolean;
-  detail?: string;
-}
-
-export interface ChecklistResult {
-  type: ReviewType;
-  items: ChecklistItem[];
-  allAutoPassed: boolean;
-  timestamp: string;
-}
+const execFileAsync = promisify(execFile);
 
 export interface ReviewSystem {
   createReview(changeName: string, type: ReviewType): Promise<string>;
@@ -170,7 +163,7 @@ export class ReviewSystemImpl implements ReviewSystem {
 
         let createdAt = '';
         try {
-          const stat = await fs.promises.stat(reviewPath);
+          const stat = await this.fs.stat(reviewPath);
           createdAt = stat.birthtime.toISOString();
         } catch {
           createdAt = new Date().toISOString();
@@ -184,7 +177,7 @@ export class ReviewSystemImpl implements ReviewSystem {
   }
 
   private updateFrontmatter(content: string, fields: Record<string, string>): string {
-    const fmRegex = /^---\n([\s\S]*?)\n---\n/;
+    const fmRegex = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
     const match = content.match(fmRegex);
     if (match) {
       const fm: Record<string, string> = {};
@@ -256,9 +249,6 @@ export class ReviewSystemImpl implements ReviewSystem {
       }
       case '代码已提交': {
         try {
-          const { execFile } = await import('child_process');
-          const { promisify } = await import('util');
-          const execFileAsync = promisify(execFile);
           const { stdout } = await execFileAsync('git', ['status', '--porcelain'], {
             cwd: this.root,
           });
@@ -281,9 +271,6 @@ export class ReviewSystemImpl implements ReviewSystem {
       }
       case '测试通过': {
         try {
-          const { execFile } = await import('child_process');
-          const { promisify } = await import('util');
-          const execFileAsync = promisify(execFile);
           await execFileAsync('npm', ['test'], { cwd: this.root });
           return { passed: true, detail: '测试已通过（实际运行 npm test）' };
         } catch (error) {
@@ -303,24 +290,12 @@ export class ReviewSystemImpl implements ReviewSystem {
       case 'Clean Code 通过': {
         try {
           const srcDir = path.join(this.root, 'src');
-          const files: string[] = [];
-          const walkDir = async (dir: string): Promise<void> => {
-            const entries = await fs.promises.readdir(dir, { withFileTypes: true });
-            for (const entry of entries) {
-              const fullPath = path.join(dir, entry.name);
-              if (entry.isDirectory()) {
-                await walkDir(fullPath);
-              } else {
-                files.push(fullPath);
-              }
-            }
-          };
-          await walkDir(srcDir);
+          const files = await walkDir(srcDir);
           let allPassed = true;
           const failedFiles: string[] = [];
           for (const file of files) {
             if (file.endsWith('.ts')) {
-              const content = await fs.promises.readFile(file, 'utf-8');
+              const content = await this.fs.readFile(file);
               const result = await this.cleanCodeChecker!.check(content, file);
               if (!result.passed) {
                 allPassed = false;
@@ -346,9 +321,6 @@ export class ReviewSystemImpl implements ReviewSystem {
       }
       case '安全扫描通过': {
         try {
-          const { execFile } = await import('child_process');
-          const { promisify } = await import('util');
-          const execFileAsync = promisify(execFile);
           await execFileAsync('npm', ['audit', '--audit-level=high'], {
             cwd: this.root,
           });

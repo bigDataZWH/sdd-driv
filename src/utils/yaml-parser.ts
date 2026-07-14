@@ -12,8 +12,8 @@ export class YamlParser {
     return parse(text) as Record<string, unknown>;
   }
 
-  stringify(obj: Record<string, unknown>): string {
-    return stringify(obj, { lineWidth: 120 });
+  stringify(obj: unknown): string {
+    return stringify(obj as Record<string, unknown>, { lineWidth: 120 });
   }
 
   async readFile(filePath: string): Promise<Record<string, unknown>> {

@@ -6,6 +6,7 @@ import * as os from 'os';
 describe('ArchiveService', () => {
   let tmpDir: string;
   let archiveService: InstanceType<any>;
+  let sm: any;
   let FileSystem: any;
   let YamlParser: any;
   let StateMachine: any;
@@ -32,7 +33,7 @@ describe('ArchiveService', () => {
     const fsImpl = new FileSystem(tmpDir);
     const parser = new YamlParser(fsImpl);
     const resolver = new PathResolver(tmpDir);
-    const sm = new StateMachine(fsImpl, parser, resolver);
+    sm = new StateMachine(fsImpl, parser, resolver);
     archiveService = new ArchiveService(fsImpl, sm, parser, tmpDir);
 
     // Initialize change
@@ -102,6 +103,7 @@ describe('ArchiveService', () => {
       const state = parse(fs.readFileSync(statePath, 'utf-8'));
       state.phases.verify.status = 'in-progress';
       fs.writeFileSync(statePath, stringify(state), 'utf-8');
+      sm.clearCache(changeName);
 
       const failures = await archiveService.checkPreconditions(changeName);
       expect(failures).toContain('verify_not_completed');
@@ -114,6 +116,7 @@ describe('ArchiveService', () => {
       const state = parse(fs.readFileSync(statePath, 'utf-8'));
       state.archived = true;
       fs.writeFileSync(statePath, stringify(state), 'utf-8');
+      sm.clearCache(changeName);
 
       const failures = await archiveService.checkPreconditions(changeName);
       expect(failures).toContain('already_archived');
@@ -174,6 +177,7 @@ describe('ArchiveService', () => {
       const state = parse(fs.readFileSync(statePath, 'utf-8'));
       state.superpowers.plan = `openspec/changes/${changeName}/plan.md`;
       fs.writeFileSync(statePath, stringify(state), 'utf-8');
+      sm.clearCache(changeName);
       fs.writeFileSync(path.join(changeDir, 'plan.md'), '# Plan content', 'utf-8');
 
       const result = await archiveService.archive(changeName);
@@ -191,6 +195,7 @@ describe('ArchiveService', () => {
       const state = parse(fs.readFileSync(statePath, 'utf-8'));
       state.superpowers.brainstorming = `openspec/changes/${changeName}/brainstorming.md`;
       fs.writeFileSync(statePath, stringify(state), 'utf-8');
+      sm.clearCache(changeName);
       fs.writeFileSync(path.join(changeDir, 'brainstorming.md'), '# Brainstorming', 'utf-8');
 
       const result = await archiveService.archive(changeName);

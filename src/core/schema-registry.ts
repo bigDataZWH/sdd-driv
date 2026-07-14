@@ -1,4 +1,4 @@
-import { parse as parseYaml } from 'yaml';
+import { parseFrontmatter } from '../utils/markdown.js';
 
 export type ArtifactType = 'proposal' | 'design' | 'spec' | 'tasks';
 
@@ -41,8 +41,8 @@ export class SchemaRegistry {
   }
 
   parseArtifact(content: string): ParsedArtifact {
-    const frontmatter = this.extractFrontmatter(content);
-    const body = frontmatter ? content.replace(/^---\n[\s\S]*?\n---\n?/, '') : content;
+    const frontmatter = parseFrontmatter(content);
+    const body = frontmatter ? content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '') : content;
     const sections = this.extractSections(body);
     return { frontmatter, body, sections };
   }
@@ -69,20 +69,6 @@ export class SchemaRegistry {
     }
 
     return { valid: errors.length === 0, errors };
-  }
-
-  private extractFrontmatter(content: string): Record<string, unknown> | null {
-    const match = content.match(/^---\n([\s\S]*?)\n---\n?/);
-    if (!match) return null;
-    try {
-      const parsed = parseYaml(match[1]);
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        return parsed as Record<string, unknown>;
-      }
-      return null;
-    } catch {
-      return null;
-    }
   }
 
   private extractSections(body: string): string[] {

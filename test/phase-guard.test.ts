@@ -425,6 +425,56 @@ describe('PhaseGuard', () => {
       expect(result.passed).toBe(false);
       expect(transition).not.toHaveBeenCalled();
     });
+
+    it('使用真实 StateMachine 实例执行 applyTransition 验证状态被实际更新', async () => {
+      const { PhaseGuardImpl } = await import('../src/core/phase-guard.js');
+      const { StateMachine } = await import('../src/core/state-machine.js');
+      const { FileSystem } = await import('../src/utils/file-system.js');
+      const { YamlParser } = await import('../src/utils/yaml-parser.js');
+      const { PathResolver } = await import('../src/core/path-resolver.js');
+
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'driv-apply-transition-'));
+      try {
+        const fsImpl = new FileSystem(tmpDir);
+        const parser = new YamlParser(fsImpl);
+        const resolver = new PathResolver(tmpDir);
+        const stateMachine = new StateMachine(fsImpl, parser, resolver);
+        const guard = new PhaseGuardImpl();
+
+        await stateMachine.initChange('integration-test');
+
+        // clarify -> design：补齐 clarify exit 所需条件
+        let state = await stateMachine.getState('integration-test');
+        state.phases.clarify.status = 'completed';
+
+        let result = await guard.applyTransition('clarify', 'design', state, stateMachine);
+        expect(result.passed).toBe(true);
+        // 真实 StateMachine.transition 被调用，状态文件已更新
+        expect((await stateMachine.getState('integration-test')).phase).toBe('design');
+
+        // design -> build：补齐 design exit 所需条件
+        state = await stateMachine.getState('integration-test');
+        state.phases.design.status = 'completed';
+        state.openspec.proposal = 'openspec/changes/integration-test/proposal.md';
+        state.openspec.design = 'openspec/changes/integration-test/design.md';
+        state.openspec.specs = ['openspec/changes/integration-test/specs/auth/spec.md'];
+        state.openspec.tasks = 'openspec/changes/integration-test/tasks.md';
+        state.phases.design.artifacts['design-converted'] = 'true';
+        state.phases.design.artifacts['detailed-design-completed'] = 'true';
+        state.phases.design.artifacts.handoff = 'valid';
+        state.hwProcess.technicalReview = 'passed';
+
+        result = await guard.applyTransition('design', 'build', state, stateMachine);
+        expect(result.passed).toBe(true);
+
+        const finalState = await stateMachine.getState('integration-test');
+        expect(finalState.phase).toBe('build');
+        expect(finalState.phases.design.status).toBe('completed');
+        expect(finalState.phases.build.status).toBe('in-progress');
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
   });
 });
 

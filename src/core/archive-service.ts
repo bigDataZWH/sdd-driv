@@ -3,7 +3,6 @@ import { StateMachine } from './state-machine.js';
 import { YamlParser } from '../utils/yaml-parser.js';
 import { parseDeltaSpec } from './delta-spec-parser.js';
 import * as path from 'path';
-import * as fs from 'fs';
 
 export type SpecMergeStrategy = 'append' | 'update' | 'supersede';
 
@@ -80,13 +79,15 @@ export class ArchiveService {
       await this.fs.ensureDir(archiveDir);
 
       const artifacts = ['proposal.md', 'design.md', 'tasks.md', '.driv.yaml'];
-      for (const artifact of artifacts) {
-        const src = path.join(changeDir, artifact);
-        const dest = path.join(archiveDir, artifact);
-        if (await this.fs.exists(src)) {
-          await this.fs.copyFile(src, dest);
-        }
-      }
+      await Promise.all(
+        artifacts.map(async (artifact) => {
+          const src = path.join(changeDir, artifact);
+          const dest = path.join(archiveDir, artifact);
+          if (await this.fs.exists(src)) {
+            await this.fs.copyFile(src, dest);
+          }
+        }),
+      );
 
       await this.copyDirRecursive(path.join(changeDir, 'specs'), path.join(archiveDir, 'specs'));
 
@@ -129,8 +130,8 @@ export class ArchiveService {
       try {
         await this.rollbackForDir(archiveDir);
         rollbackPerformed = true;
-      } catch {
-        // rollback best-effort
+      } catch (err) {
+        console.warn(`[driv] archive: rollback failed: ${(err as Error).message}`);
       }
       return {
         archived: false,
@@ -244,7 +245,7 @@ export class ArchiveService {
 
     for (const dir of matchingDirs) {
       const fullPath = path.join(archiveDir, dir);
-      await fs.promises.rm(fullPath, { recursive: true, force: true });
+      await this.fs.rm(fullPath, { recursive: true, force: true });
     }
 
     // 恢复 spec backup（mergeDeltaSpec 改写主 spec 时留下的 .backup）
@@ -258,7 +259,8 @@ export class ArchiveService {
     let entries: string[] = [];
     try {
       entries = await this.fs.listDir(specsDir);
-    } catch {
+    } catch (err) {
+      console.warn(`[driv] archive: failed to list specs for restore: ${(err as Error).message}`);
       return;
     }
 
@@ -270,9 +272,9 @@ export class ArchiveService {
         try {
           const backupContent = await this.fs.readFile(backupPath);
           await this.fs.writeFile(specPath, backupContent);
-          await fs.promises.unlink(backupPath);
-        } catch {
-          // best-effort: 恢复失败不影响 rollback 整体
+          await this.fs.unlink(backupPath);
+        } catch (err) {
+          console.warn(`[driv] archive: failed to restore spec backup: ${(err as Error).message}`);
         }
       }
     }
@@ -288,7 +290,7 @@ export class ArchiveService {
       const srcPath = path.join(srcDir, entry);
       const destPath = path.join(destDir, entry);
 
-      const stat = await fs.promises.stat(srcPath);
+      const stat = await this.fs.stat(srcPath);
       if (stat.isDirectory()) {
         await this.copyDirRecursive(srcPath, destPath);
       } else {
@@ -299,7 +301,7 @@ export class ArchiveService {
 
   private async rollbackForDir(archiveDir: string): Promise<void> {
     if (await this.fs.exists(archiveDir)) {
-      await fs.promises.rm(archiveDir, { recursive: true, force: true });
+      await this.fs.rm(archiveDir, { recursive: true, force: true });
     }
   }
 

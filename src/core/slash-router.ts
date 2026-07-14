@@ -52,10 +52,6 @@ export function getSlashCommandEntry(name: string): SlashCommandEntry | undefine
   return DRIV_COMMANDS.find((c) => c.name === name);
 }
 
-async function initDrivState(_cwd: string): Promise<void> {
-  // .driv.yaml 由 StateMachine.initChange() 在 openspec/changes/<name>/ 下管理
-}
-
 function resolveSkillPath(cwd: string, skillName: string): string {
   const base = cwd === process.cwd() ? OPENCODE_SKILLS_DIR : path.join(cwd, '.opencode', 'skills');
   return path.join(base, skillName, 'SKILL.md');
@@ -87,10 +83,6 @@ export async function executeSlashCommand(
   const cwd = context?.cwd || process.cwd();
   const skillPath = resolveSkillPath(cwd, entry.skillName);
   const commandPath = resolveCommandPath(cwd, entry.skillName);
-
-  if (entry.name === '/driv-clarify') {
-    await initDrivState(cwd);
-  }
 
   return {
     success: true,
