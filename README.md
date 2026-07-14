@@ -299,13 +299,87 @@ Default templates live in `.driv/templates/`:
 | specs      | default, capability, api, component, service                                           |
 | reviews    | requirement-review, technical-review, code-review                                       |
 
+### 4-Layer Template Stack
+
+Template lookup follows a 4-layer stack, from highest to lowest priority:
+
+| Layer       | Path                                                          | Description                                                        |
+| ----------- | ------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Override    | `.driv/templates/custom/<category>/<name>.md`                 | Project-level custom templates                                     |
+| Preset      | `.driv/templates/presets/<preset_name>/<category>/<name>.md`  | Preset suites, enabled via `presets.active` in `config.yaml`       |
+| Extension   | (based on frontmatter `extends:` field)                       | Automatically inherits parent template declared in frontmatter     |
+| Core        | `.driv/templates/<category>/<name>.md`                        | Built-in default templates                                         |
+
 ### Placeholders
 
 Supports `{{name}}` and `{{name:default}}` syntax for template parameter substitution.
 
-### Inheritance Strategy
+- `{{name}}` — placeholder without default value
+- `{{name:default}}` — placeholder with default value
+- Allowed character set for names: `[a-z_0-9]`
 
-Supports section-level template inheritance: `extend` (append), `override` (replace), `merge` (combine), `add` (new).
+### Inheritance Strategies
+
+Supports section-level template inheritance with 8 strategies:
+
+| Strategy  | Behavior                                                                        |
+| --------- | ------------------------------------------------------------------------------- |
+| `extend`  | Parent template content prepended to child (parent frontmatter preserved)        |
+| `override`| Replace parent section of the same name with child's specified section           |
+| `merge`   | Merge content and children of parent and child (no duplicates at same level)     |
+| `add`     | Add when parent does not have the section (preserve original level)              |
+| `replace` | Fully replace the parent's specified section                                     |
+| `prepend` | Prepend child section content before parent's corresponding section content      |
+| `append`  | Append child section content after parent's corresponding section content        |
+| `wrap`    | Replace `{{CORE_TEMPLATE}}` placeholder in child with parent section content     |
+
+### Multi-level Inheritance
+
+Supports full multi-level inheritance chains, e.g. `default <- feature <- feature-v2`:
+
+- Configured via `inheritance.rules` in `config.yaml`
+- Or implicitly declared via the `extends:` field in child template frontmatter
+- Automatic cycle detection (prevents A→B→A infinite loops)
+- Merged from the topmost parent down to the child level by level
+
+```yaml
+inheritance:
+  rules:
+    - parent: default
+      child: feature
+    - parent: feature
+      child: feature-v2
+```
+
+### Frontmatter Metadata
+
+Templates support frontmatter (YAML format) declarations:
+
+- `extends: <parent_name>` — implicit inheritance declaration
+- `placeholders_required: [name1, name2]` — required placeholder declarations (checked during validation, supports `{{name:default}}` form)
+
+```yaml
+---
+extends: feature
+placeholders_required: [author, version]
+---
+```
+
+### Custom Search Paths
+
+`project_override.search_paths` in `config.yaml` supports flexible path configuration:
+
+- `.driv/templates/custom` — generic custom directory
+- `.driv/templates/proposals/custom/` — type-specific custom directory
+- `custom/{category}` — uses `{category}` placeholder
+
+```yaml
+project_override:
+  search_paths:
+    - .driv/templates/custom
+    - .driv/templates/proposals/custom/
+    - custom/{category}
+```
 
 ## Clean Code Check
 

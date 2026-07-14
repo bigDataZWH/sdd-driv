@@ -296,13 +296,87 @@ archived: false
 | specs     | default、capability、api、component、service                      |
 | reviews   | requirement-review、technical-review、code-review                 |
 
+### 4 层模板栈
+
+模板查找遵循 4 层栈，从高到低优先级：
+
+| 层级       | 路径                                                          | 说明                                                              |
+|-----------|---------------------------------------------------------------|-------------------------------------------------------------------|
+| Override  | `.driv/templates/custom/<category>/<name>.md`                 | 项目级自定义模板                                                   |
+| Preset    | `.driv/templates/presets/<preset_name>/<category>/<name>.md`  | 预设套件，通过 `config.yaml` 的 `presets.active` 启用              |
+| Extension | （基于 frontmatter 的 `extends:` 字段）                       | 自动继承 frontmatter 中声明的父模板                                |
+| Core      | `.driv/templates/<category>/<name>.md`                        | 内置默认模板                                                       |
+
 ### 占位符
 
 支持 `{{name}}` 和 `{{name:default}}` 语法，用于模板参数替换。
 
+- `{{name}}` — 无默认值占位符
+- `{{name:default}}` — 带默认值占位符
+- 名称字符集：`[a-z_0-9]`
+
 ### 继承策略
 
-支持 section 级模板继承：extend（追加）、override（替换）、merge（合并）、add（新增）。
+支持 section 级模板继承，共 8 种策略：
+
+| 策略       | 行为                                                                       |
+|-----------|----------------------------------------------------------------------------|
+| `extend`  | 父模板内容前置于子模板（保留父 frontmatter）                                 |
+| `override`| 用子模板的指定 section 替换父模板同名 section                                |
+| `merge`   | 合并父子的 content 和 children（同名同 level 不重复）                        |
+| `add`     | 父模板不存在该 section 时添加（保持原 level）                                |
+| `replace` | 完全替换父模板指定 section                                                  |
+| `prepend` | 子 section content 前置到父对应 section 的 content 前                        |
+| `append`  | 子 section content 追加到父对应 section 的 content 后                        |
+| `wrap`    | 子模板中的 `{{CORE_TEMPLATE}}` 占位符被替换为父模板对应 section 的 content    |
+
+### 多级继承
+
+支持完整的多级继承链，例如 `default <- feature <- feature-v2`：
+
+- 通过 `config.yaml` 的 `inheritance.rules` 配置
+- 或通过子模板 frontmatter 的 `extends:` 字段隐式声明
+- 自动循环检测（避免 A→B→A 死循环）
+- 从最父级开始逐级合并到子级
+
+```yaml
+inheritance:
+  rules:
+    - parent: default
+      child: feature
+    - parent: feature
+      child: feature-v2
+```
+
+### Frontmatter 元数据
+
+模板支持 frontmatter（YAML 格式）声明：
+
+- `extends: <parent_name>` — 隐式继承声明
+- `placeholders_required: [name1, name2]` — 必填占位符声明（校验时检查，支持 `{{name:default}}` 形式）
+
+```yaml
+---
+extends: feature
+placeholders_required: [author, version]
+---
+```
+
+### 自定义搜索路径
+
+`config.yaml` 的 `project_override.search_paths` 支持灵活路径配置：
+
+- `.driv/templates/custom` — 通用自定义目录
+- `.driv/templates/proposals/custom/` — 类型专属自定义目录
+- `custom/{category}` — 使用 `{category}` 占位符
+
+```yaml
+project_override:
+  search_paths:
+    - .driv/templates/custom
+    - .driv/templates/proposals/custom/
+    - custom/{category}
+```
 
 ## Clean Code 检查
 
