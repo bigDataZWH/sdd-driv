@@ -4,7 +4,7 @@ import { applyInheritance, resolveChain, type InheritanceRule } from './template
 import { parse as parseYaml } from 'yaml';
 import * as path from 'path';
 
-export type TemplateType = 'proposal' | 'design' | 'spec' | 'review';
+export type TemplateType = 'proposal' | 'design' | 'spec' | 'review' | 'prd';
 
 export interface TemplateInfo {
   name: string;
@@ -29,6 +29,7 @@ interface TemplateConfig {
   proposals: TemplateCategoryConfig;
   designs: TemplateCategoryConfig;
   specs: TemplateCategoryConfig;
+  prds: TemplateCategoryConfig;
   reviews: Record<string, string>;
   inheritance: { rules: InheritanceRule[] };
   placeholders: { system: string[]; user: string[] };
@@ -36,7 +37,7 @@ interface TemplateConfig {
   presets?: { active?: string };
 }
 
-type TemplateCategory = 'proposals' | 'designs' | 'specs' | 'reviews';
+type TemplateCategory = 'proposals' | 'designs' | 'specs' | 'prds' | 'reviews';
 
 const DEFAULT_CONFIG: TemplateConfig = {
   version: '1',
@@ -67,6 +68,10 @@ const DEFAULT_CONFIG: TemplateConfig = {
       component: 'component',
       service: 'service',
     },
+  },
+  prds: {
+    default: 'default',
+    types: {},
   },
   reviews: {
     requirement: 'requirement-review',
@@ -110,6 +115,7 @@ function deepMerge<T>(base: T, override: Partial<T>): T {
 }
 
 function categoryForType(type: TemplateType): TemplateCategory {
+  if (type === 'prd') return 'prds';
   return `${type}s` as TemplateCategory;
 }
 
@@ -296,7 +302,7 @@ export class TemplateManager {
   }
 
   async listTemplates(type?: TemplateType): Promise<TemplateInfo[]> {
-    const types: TemplateType[] = type ? [type] : ['proposal', 'design', 'spec', 'review'];
+    const types: TemplateType[] = type ? [type] : ['proposal', 'design', 'spec', 'review', 'prd'];
     // 并行读取各类型目录，提升 IO 并发度
     const results = await Promise.all(
       types.map(async (t): Promise<TemplateInfo[]> => {

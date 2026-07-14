@@ -77,6 +77,7 @@ export interface ChangeState {
   createdAt: string;
   openspec: {
     changeDir: string;
+    prd?: string;
     proposal?: string;
     design?: string;
     tasks?: string;
@@ -137,24 +138,24 @@ export function createDefaultState(changeName: string): ChangeState {
     createdAt: now,
     openspec: {
       changeDir,
-      proposal: `${changeDir}/proposal.md`,
-      design: `${changeDir}/design.md`,
-      specs: [],
+      prd: `${changeDir}/prd.md`,
     },
     superpowers: {},
     phases: {
       clarify: {
         status: 'in-progress',
         artifacts: {
-          proposal: `${changeDir}/proposal.md`,
-          design: `${changeDir}/design.md`,
-          tasks: `${changeDir}/tasks.md`,
-          specs: `${changeDir}/specs.json`,
+          prd: `${changeDir}/prd.md`,
         },
       },
       design: {
         status: 'pending',
         artifacts: {
+          proposal: `${changeDir}/proposal.md`,
+          design: `${changeDir}/design.md`,
+          tasks: `${changeDir}/tasks.md`,
+          specs: `${changeDir}/specs.json`,
+          'design-converted': 'false',
           'detailed-design-completed': 'false',
         },
       },

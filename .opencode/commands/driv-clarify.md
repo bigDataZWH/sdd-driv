@@ -5,21 +5,16 @@ description: Run the driv-clarify OpenCode workflow
 Equivalent skill: `driv-clarify`
 Command name: `/driv-clarify`
 
-Use the invocation arguments below as the user input for this workflow:
-
-```text
-$ARGUMENTS
-```
-
-需求澄清：通过 openspec-explore 进行多轮对话，分析存量功能，生成完整的 OpenSpec 交付件。
+需求澄清：通过多轮对话生成 PRD（产品需求文档），初始化状态文件。
 
 **Input**: 变更描述或现有的需求信息。
 
 **核心流程**:
 
-1. **前置探索** — 调用 openspec-explore 进行多轮对话，收集需求信息
+1. **前置探索** — 通过多轮对话收集需求信息
 2. **存量分析** — 提示用户提供代码仓地址，进行存量功能分析（若用户已提供）
-3. **方案输出** — 结合用户输入和存量分析结果，给出完整方案
+3. **PRD 生成** — 结合用户输入和存量分析结果，生成产品需求文档
+4. **状态初始化** — 创建 .openspec.yaml 和 .driv.yaml
 
 **Steps**:
 
@@ -36,43 +31,18 @@ $ARGUMENTS
 
 2. **存量分析** — 若用户提供代码仓地址，分析现有功能结构和代码质量
 3. **生成 Change 名称** — 从输入推导 kebab-case change 名称，确保 `openspec/changes/<name>/` 存在
-4. **生成 proposal.md** — 使用 `.driv/templates/proposals/default.md` 模板，包含 8 条验收标准
-   - **必须包含 `## Intent` 章节** — 一句话锁定本次变更核心意图（如：'修复用户登录超时 bug，不改变现有 API 签名'）。该意图将在 Design→Build 边界作为意图锁（Intent Lock）用于 design.md 对齐校验。
-
-**⚠️ Decision Point DP-1: 提案确认**
-- 暂停工作流，向用户展示当前产出件
-- 等待用户确认（confirmed）后再进入下一步
-- 用户拒绝时返回当前步骤修改，不进入下一阶段
-
-5. **生成 tasks.md** — 任务清单（跨 5 阶段，约 22 项）
-
-**⚠️ Decision Point DP-4: 任务确认**
-- 暂停工作流，向用户展示当前产出件
-- 等待用户确认（confirmed）后再进入下一步
-- 用户拒绝时返回当前步骤修改，不进入下一阶段
-
-6. **生成 specs/<capability>/spec.md** — 能力规格（行为场景描述），由 AI 直接基于 OpenSpec 模板生成，不经过 design-to-spec-converter 转换
-
-**⚠️ Decision Point DP-2: 规格确认**
-- 暂停工作流，向用户展示当前产出件
-- 等待用户确认（confirmed）后再进入下一步
-- 用户拒绝时返回当前步骤修改，不进入下一阶段
-
-7. **生成 reviews/requirement-review.md** — 需求评审（AI 预检）
-8. **创建 .openspec.yaml** — 记录 schema、change、phase、status、created 和 proposal artifact
-9. **创建 .driv.yaml** — 初始化状态文件，设置 clarify 阶段为 in-progress
-10. **输出结果** — 显示生成的文件清单和下一步 `/driv-design`
+4. **生成 prd.md** — 使用 `.driv/templates/prds/default.md` 模板，包含必填章节：需求背景、用户故事、功能范围、验收标准、技术约束
+5. **创建 .openspec.yaml** — 记录 schema、change、phase、status、created
+6. **创建 .driv.yaml** — 初始化状态文件，设置 clarify 阶段为 in-progress
+7. **输出结果** — 显示生成的文件清单和下一步 `/driv-design`
 
 **Output**:
 
 - **生成文件**:
-  - `openspec/changes/<name>/proposal.md` — 功能提案（包含验收标准）
-  - `openspec/changes/<name>/tasks.md` — 任务清单（跨 5 阶段）
-  - `openspec/changes/<name>/specs/<name>.md` — 能力规格（行为场景）
-  - `openspec/changes/<name>/reviews/requirement-review.md` — 需求评审（AI 预检）
+  - `openspec/changes/<name>/prd.md` — 产品需求文档
   - `openspec/changes/<name>/.openspec.yaml` — OpenSpec 元数据
   - `.driv.yaml` — 初始化状态文件
-- **状态更新**: phases.clarify（status/in-progress、artifacts/proposal/tasks/specs）
+- **状态更新**: phases.clarify（status/in-progress、artifacts/prd）
 - **下一步**: Clarify 完成后调用 `/driv-design` 进入 Design 阶段
 
 ---

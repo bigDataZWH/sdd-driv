@@ -67,10 +67,11 @@ describe('Driv 基础类型定义', () => {
     expect(state.workflow).toBe('full');
     expect(state.phase).toBe('clarify');
     expect(state.openspec).toBeDefined();
-    expect(state.openspec.proposal).toBe('openspec/changes/test-change/proposal.md');
-    expect(state.openspec.design).toBe('openspec/changes/test-change/design.md');
+    expect(state.openspec.prd).toBe('openspec/changes/test-change/prd.md');
+    expect(state.openspec.proposal).toBeUndefined();
+    expect(state.openspec.design).toBeUndefined();
     expect(state.openspec.tasks).toBeUndefined();
-    expect(state.openspec.specs).toEqual([]);
+    expect(state.openspec.specs).toBeUndefined();
     expect(state.superpowers).toBeDefined();
     expect(state.superpowers.plan).toBeUndefined();
     expect(state.superpowers.brainstorming).toBeUndefined();

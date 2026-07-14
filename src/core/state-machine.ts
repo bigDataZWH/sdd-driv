@@ -91,10 +91,37 @@ export class StateMachine {
     return 'light';
   }
 
+  async setPrdPath(changeName: string, prdPath: string): Promise<void> {
+    const state = await this.getState(changeName);
+    state.openspec.prd = prdPath;
+    state.phases.clarify.artifacts.prd = prdPath;
+    const filePath = this.resolver.stateFile(changeName);
+    const yamlContent = this.parser.stringify(state as unknown as Record<string, unknown>);
+    await this.fs.writeFile(filePath, yamlContent);
+  }
+
+  async setProposalPath(changeName: string, proposalPath: string): Promise<void> {
+    const state = await this.getState(changeName);
+    state.openspec.proposal = proposalPath;
+    state.phases.design.artifacts.proposal = proposalPath;
+    const filePath = this.resolver.stateFile(changeName);
+    const yamlContent = this.parser.stringify(state as unknown as Record<string, unknown>);
+    await this.fs.writeFile(filePath, yamlContent);
+  }
+
   async setDesignPath(changeName: string, designPath: string): Promise<void> {
     const state = await this.getState(changeName);
     state.openspec.design = designPath;
-    state.phases.clarify.artifacts.design = designPath;
+    state.phases.design.artifacts.design = designPath;
+    const filePath = this.resolver.stateFile(changeName);
+    const yamlContent = this.parser.stringify(state as unknown as Record<string, unknown>);
+    await this.fs.writeFile(filePath, yamlContent);
+  }
+
+  async setTasksPath(changeName: string, tasksPath: string): Promise<void> {
+    const state = await this.getState(changeName);
+    state.openspec.tasks = tasksPath;
+    state.phases.design.artifacts.tasks = tasksPath;
     const filePath = this.resolver.stateFile(changeName);
     const yamlContent = this.parser.stringify(state as unknown as Record<string, unknown>);
     await this.fs.writeFile(filePath, yamlContent);
@@ -103,7 +130,15 @@ export class StateMachine {
   async setSpecsPaths(changeName: string, specsPaths: string[]): Promise<void> {
     const state = await this.getState(changeName);
     state.openspec.specs = specsPaths;
-    state.phases.clarify.artifacts.specs = specsPaths.join(',');
+    state.phases.design.artifacts.specs = specsPaths.join(',');
+    const filePath = this.resolver.stateFile(changeName);
+    const yamlContent = this.parser.stringify(state as unknown as Record<string, unknown>);
+    await this.fs.writeFile(filePath, yamlContent);
+  }
+
+  async setDesignConverted(changeName: string, value: string): Promise<void> {
+    const state = await this.getState(changeName);
+    state.phases.design.artifacts['design-converted'] = value;
     const filePath = this.resolver.stateFile(changeName);
     const yamlContent = this.parser.stringify(state as unknown as Record<string, unknown>);
     await this.fs.writeFile(filePath, yamlContent);

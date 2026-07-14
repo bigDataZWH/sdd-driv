@@ -101,6 +101,7 @@ describe('BuildOrchestrator (1.1-1.5)', () => {
       await stateMachine.initChange(name);
       await stateMachine.transition(name, 'design');
       await stateMachine.transition(name, 'build');
+      await stateMachine.setField(name, 'openspec.proposal', `openspec/changes/${name}/proposal.md`);
       await stateMachine.setField(name, 'openspec.design', `openspec/changes/${name}/design.md`);
       await stateMachine.setField(name, 'openspec.tasks', `openspec/changes/${name}/tasks.md`);
       await stateMachine.setField(name, 'openspec.specs', [

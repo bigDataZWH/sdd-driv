@@ -50,10 +50,11 @@ describe('StateMachine', () => {
       expect(state.change).toBe('test-change');
       expect(state.workflow).toBe('full');
       expect(state.phase).toBe('clarify');
-      expect(state.openspec.proposal).toBe('openspec/changes/test-change/proposal.md');
-      expect(state.openspec.design).toBe('openspec/changes/test-change/design.md');
+      expect(state.openspec.prd).toBe('openspec/changes/test-change/prd.md');
+      expect(state.openspec.proposal).toBeUndefined();
+      expect(state.openspec.design).toBeUndefined();
       expect(state.openspec.tasks).toBeUndefined();
-      expect(state.openspec.specs).toEqual([]);
+      expect(state.openspec.specs).toBeUndefined();
       expect(state.phases.clarify.status).toBe('in-progress');
       expect(state.phases.design.status).toBe('pending');
       expect(state.phases.build.status).toBe('pending');
@@ -220,13 +221,13 @@ describe('StateMachine', () => {
       expect(state.phases.design.artifacts['detailed-design-completed']).toBe('true');
     });
 
-    it('setDesignPath 同时更新 openspec.design 与 clarify.artifacts.design', async () => {
+    it('setDesignPath 同时更新 openspec.design 与 design.artifacts.design', async () => {
       await stateMachine.initChange('test-change');
       await stateMachine.setDesignPath('test-change', 'openspec/changes/test-change/design.md');
 
       const state = await stateMachine.getState('test-change');
       expect(state.openspec.design).toBe('openspec/changes/test-change/design.md');
-      expect(state.phases.clarify.artifacts.design).toBe('openspec/changes/test-change/design.md');
+      expect(state.phases.design.artifacts.design).toBe('openspec/changes/test-change/design.md');
     });
 
     it('setSpecsPaths 写入 openspec.specs 数组与 artifacts.specs 逗号拼接', async () => {
@@ -239,7 +240,7 @@ describe('StateMachine', () => {
 
       const state = await stateMachine.getState('test-change');
       expect(state.openspec.specs).toEqual(specs);
-      expect(state.phases.clarify.artifacts.specs).toBe(specs.join(','));
+      expect(state.phases.design.artifacts.specs).toBe(specs.join(','));
     });
   });
 });

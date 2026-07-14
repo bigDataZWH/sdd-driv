@@ -34,7 +34,7 @@ describe('Driv 命令资产', () => {
     }
   });
 
-  it('driv-clarify 文案生成完整的 OpenSpec 交付件', () => {
+  it('driv-clarify 文案生成 PRD 交付件', () => {
     const root = process.cwd();
     const paths = [
       path.join(root, '.opencode', 'skills', 'driv-clarify', 'SKILL.md'),
@@ -43,13 +43,9 @@ describe('Driv 命令资产', () => {
 
     for (const filePath of paths) {
       const content = fs.readFileSync(filePath, 'utf-8');
-      expect(content).toContain('proposal.md');
+      expect(content).toContain('prd.md');
       expect(content).toContain('.openspec.yaml');
-      expect(content).toContain('tasks.md');
-      expect(content).toContain('specs/');
-      expect(content).toContain('reviews/requirement-review.md');
       expect(content).toContain('.driv.yaml');
-      expect(content).toContain('openspec-explore');
     }
   });
 

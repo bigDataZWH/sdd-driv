@@ -106,9 +106,9 @@ export class PhaseGuardImpl implements PhaseGuard {
         ),
       );
     }
-    if (!state.openspec.proposal) {
+    if (!state.openspec.prd) {
       failures.push(
-        fail('proposal_exists', 'proposal 路径已设置', '未设置', 'error', '提案文件缺失'),
+        fail('prd_exists', 'prd 路径已设置', '未设置', 'error', 'PRD 文件缺失'),
       );
     }
     return buildResult('design', 'entry', failures);
@@ -324,6 +324,65 @@ export class PhaseGuardImpl implements PhaseGuard {
   private async checkClarifyExit(state: ChangeState): Promise<GuardResult> {
     const failures: GuardFailure[] = [];
 
+    if (!state.openspec.prd) {
+      failures.push(
+        fail(
+          'prd_exists',
+          'prd 路径已设置',
+          '未设置',
+          'error',
+          'PRD 文件路径未设置，请先创建 prd.md',
+        ),
+      );
+    }
+
+    if (state.phases.clarify.status !== 'completed') {
+      failures.push(
+        fail(
+          'clarify_completed',
+          'clarify 阶段状态为 completed',
+          state.phases.clarify.status,
+          'error',
+          'Clarify 阶段未完成，请先确认 PRD',
+        ),
+      );
+    }
+
+    // advisory: PRD 章节结构校验（best-effort，不阻断）
+    if (state.openspec.prd && this.templateManager && this.fs) {
+      try {
+        const prdPath = this.resolvePath(state.openspec.prd);
+        if (await this.fs.exists(prdPath)) {
+          const content = await this.fs.readFile(prdPath);
+          const requiredSections = await this.templateManager.getRequiredSections(
+            'prd',
+            'default',
+          );
+          for (const section of requiredSections) {
+            if (!content.includes(`## ${section}`)) {
+              failures.push(
+                fail(
+                  `prd_section_${section}`,
+                  `prd 包含章节: ${section}`,
+                  '缺失',
+                  'warning',
+                  `PRD 缺少必填章节: ${section}，请参考 .driv/templates/prds/default.md 模板结构`,
+                ),
+              );
+            }
+          }
+        }
+      } catch {
+        // best-effort，校验失败静默跳过
+      }
+    }
+
+    return buildResult('clarify', 'exit', failures);
+  }
+
+  private checkDesignExit(state: ChangeState): GuardResult {
+    const failures: GuardFailure[] = [];
+
     if (!state.openspec.proposal) {
       failures.push(
         fail(
@@ -372,109 +431,14 @@ export class PhaseGuardImpl implements PhaseGuard {
       );
     }
 
-    if (state.phases.clarify.status !== 'completed') {
+    if (state.phases.design.artifacts['design-converted'] !== 'true') {
       failures.push(
         fail(
-          'proposal_complete',
-          'clarify 阶段状态为 completed',
-          state.phases.clarify.status,
+          'design_converted',
+          'design-converted 为 true',
+          state.phases.design.artifacts['design-converted'] || '未设置',
           'error',
-          '提案未完成，请先完成 clarify 阶段',
-        ),
-      );
-    }
-
-    // advisory: SchemaRegistry 校验 proposal（best-effort，不阻断）
-    if (this.fs && this.schemaRegistry && state.openspec.proposal) {
-      try {
-        const content = await this.fs.readFile(this.resolvePath(state.openspec.proposal));
-        const parsed = this.schemaRegistry.parseArtifact(content);
-        const result = this.schemaRegistry.validate('proposal', parsed);
-        if (!result.valid) {
-          failures.push(
-            fail(
-              'proposal-schema-valid',
-              'proposal 符合 schema',
-              'schema 校验失败',
-              'warning',
-              `proposal schema 校验失败: ${result.errors?.join('; ') ?? ''}`,
-            ),
-          );
-        }
-      } catch {
-        // best-effort，文件读取失败不阻断
-      }
-    }
-
-    // advisory: EARS 句式校验 specs（best-effort，不阻断）
-    if (this.fs && state.openspec.specs && state.openspec.specs.length > 0) {
-      for (const specsPath of state.openspec.specs) {
-        try {
-          const resolvedSpecsPath = this.resolvePath(specsPath);
-          if (await this.fs.exists(resolvedSpecsPath)) {
-            const specContent = await this.fs.readFile(resolvedSpecsPath);
-            const earsResult = validateEARS(specContent);
-            if (!earsResult.valid) {
-              failures.push(
-                fail(
-                  'ears-syntax',
-                  'spec 符合 EARS 句式',
-                  '存在不符合 EARS 的语句',
-                  'warning',
-                  `EARS 句式建议 (${specsPath}): ${earsResult.issues.join('; ')}`,
-                ),
-              );
-            }
-          }
-        } catch {
-          // best-effort
-        }
-      }
-    }
-
-    // advisory: proposal 章节结构校验（best-effort，不阻断）
-    if (state.openspec.proposal && this.templateManager && this.fs) {
-      try {
-        const proposalPath = this.resolvePath(state.openspec.proposal);
-        if (await this.fs.exists(proposalPath)) {
-          const content = await this.fs.readFile(proposalPath);
-          const requiredSections = await this.templateManager.getRequiredSections(
-            'proposal',
-            'default',
-          );
-          for (const section of requiredSections) {
-            if (!content.includes(`## ${section}`)) {
-              failures.push(
-                fail(
-                  `proposal_section_${section}`,
-                  `proposal 包含章节: ${section}`,
-                  '缺失',
-                  'warning',
-                  `proposal 缺少必填章节: ${section}，请参考 .driv/templates/proposals/default.md 模板结构`,
-                ),
-              );
-            }
-          }
-        }
-      } catch {
-        // best-effort，校验失败静默跳过
-      }
-    }
-
-    return buildResult('clarify', 'exit', failures);
-  }
-
-  private checkDesignExit(state: ChangeState): GuardResult {
-    const failures: GuardFailure[] = [];
-
-    if (!state.openspec.design) {
-      failures.push(
-        fail(
-          'design_doc_exists',
-          'design 路径已设置',
-          '未设置',
-          'error',
-          '设计文档路径未设置，请先创建 design.md',
+          '设计转换未完成，请先完成 design 转换',
         ),
       );
     }

@@ -11,10 +11,11 @@ export interface RecoveryState {
 export class ContextRecovery {
   async recover(data: Partial<ChangeState>): Promise<RecoveryState> {
     const partial = !data.change || !data.phase;
+    const tasksAvailable = !!(data.openspec?.tasks || data.phase === 'clarify');
     return {
       change: data.change || 'unknown',
       phase: data.phase || 'clarify',
-      tasksProgress: data.openspec?.tasks ? 'available' : 'missing',
+      tasksProgress: tasksAvailable ? 'available' : 'missing',
       handoffValid: data.phase !== 'clarify', // 非 clarify 阶段应有 handoff
       partial,
     };

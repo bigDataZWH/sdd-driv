@@ -32,14 +32,11 @@ describe('PhaseGuard', () => {
       expect(result.direction).toBe('entry');
     });
 
-    it('Clarify exit 在 proposal 存在且阶段完成时通过', async () => {
+    it('Clarify exit 在 prd 存在且阶段完成时通过', async () => {
       const { PhaseGuardImpl } = await import('../src/core/phase-guard.js');
       const { createDefaultState } = await import('../src/core/types.js');
       const guard = new PhaseGuardImpl();
       const state = createDefaultState('test');
-      state.openspec.proposal = 'openspec/changes/test/proposal.md';
-      state.openspec.specs = ['openspec/changes/test/specs/auth/spec.md'];
-      state.openspec.tasks = 'openspec/changes/test/tasks.md';
       state.phases.clarify.status = 'completed';
 
       const result = await guard.checkExit('clarify', state);
@@ -48,17 +45,17 @@ describe('PhaseGuard', () => {
       expect(result.failures).toHaveLength(0);
     });
 
-    it('Clarify exit 在 proposal 缺失时失败', async () => {
+    it('Clarify exit 在 prd 缺失时失败', async () => {
       const { PhaseGuardImpl } = await import('../src/core/phase-guard.js');
       const { createDefaultState } = await import('../src/core/types.js');
       const guard = new PhaseGuardImpl();
       const state = createDefaultState('test');
-      state.openspec.proposal = '';
+      state.openspec.prd = '';
 
       const result = await guard.checkExit('clarify', state);
 
       expect(result.passed).toBe(false);
-      expect(result.failures.some((f) => f.check === 'proposal_exists')).toBe(true);
+      expect(result.failures.some((f) => f.check === 'prd_exists')).toBe(true);
     });
   });
 
@@ -68,8 +65,12 @@ describe('PhaseGuard', () => {
       const { createDefaultState } = await import('../src/core/types.js');
       const guard = new PhaseGuardImpl();
       const state = createDefaultState('test');
+      state.openspec.proposal = 'openspec/changes/test/proposal.md';
       state.openspec.design = 'openspec/changes/test/design.md';
+      state.openspec.specs = ['openspec/changes/test/specs/auth/spec.md'];
+      state.openspec.tasks = 'openspec/changes/test/tasks.md';
       state.phases.design.status = 'completed';
+      state.phases.design.artifacts['design-converted'] = 'true';
       state.phases.design.artifacts['detailed-design-completed'] = 'true';
       state.phases.design.artifacts.handoff = 'valid';
       state.hwProcess.technicalReview = 'passed';
@@ -85,8 +86,12 @@ describe('PhaseGuard', () => {
       const { createDefaultState } = await import('../src/core/types.js');
       const guard = new PhaseGuardImpl();
       const state = createDefaultState('test');
+      state.openspec.proposal = 'openspec/changes/test/proposal.md';
       state.openspec.design = 'openspec/changes/test/design.md';
+      state.openspec.specs = ['openspec/changes/test/specs/auth/spec.md'];
+      state.openspec.tasks = 'openspec/changes/test/tasks.md';
       state.phases.design.status = 'completed';
+      state.phases.design.artifacts['design-converted'] = 'true';
       state.phases.design.artifacts['detailed-design-completed'] = 'true';
       state.phases.design.artifacts.handoff = 'valid';
       state.hwProcess.technicalReview = 'passed';
@@ -117,7 +122,7 @@ describe('PhaseGuard', () => {
       const state = createDefaultState('test');
       state.phase = 'design';
       state.phases.clarify.status = 'completed';
-      state.openspec.proposal = 'proposal.md';
+      state.openspec.prd = 'prd.md';
       state.hwProcess.requirementReview = 'passed';
 
       const result = await guard.checkEntry('design', state);
@@ -359,14 +364,14 @@ describe('PhaseGuard', () => {
       expect(result.passed).toBe(true);
     });
 
-    it('Design entry 只要求 Clarify 完成且 proposal 存在', async () => {
+    it('Design entry 只要求 Clarify 完成且 prd 存在', async () => {
       const { PhaseGuardImpl } = await import('../src/core/phase-guard.js');
       const { createDefaultState } = await import('../src/core/types.js');
       const guard = new PhaseGuardImpl();
       const state = createDefaultState('test');
       state.phase = 'design';
       state.phases.clarify.status = 'completed';
-      state.openspec.proposal = 'proposal.md';
+      state.openspec.prd = 'prd.md';
 
       const result = await guard.checkEntry('design', state);
 
@@ -394,9 +399,6 @@ describe('PhaseGuard', () => {
       const { createDefaultState } = await import('../src/core/types.js');
       const guard = new PhaseGuardImpl();
       const state = createDefaultState('test');
-      state.openspec.proposal = 'proposal.md';
-      state.openspec.specs = ['openspec/changes/test/specs/auth/spec.md'];
-      state.openspec.tasks = 'openspec/changes/test/tasks.md';
       state.phases.clarify.status = 'completed';
 
       const transition = vi.fn();
@@ -413,7 +415,7 @@ describe('PhaseGuard', () => {
       const { createDefaultState } = await import('../src/core/types.js');
       const guard = new PhaseGuardImpl();
       const state = createDefaultState('test');
-      state.openspec.proposal = '';
+      state.openspec.prd = '';
 
       const transition = vi.fn();
       const stateMachine = { transition };
@@ -714,22 +716,18 @@ describe('P3-1 - PhaseGuard 集成 SchemaRegistry', () => {
     expect(result.failures.some((f) => f.check === 'proposal-schema-valid')).toBe(false);
   });
 
-  it('proposal 缺少标题时报 proposal-schema-valid warning', async () => {
-    // 无 # 标题 -> schema 校验失败
+  it('proposal 缺少标题时不报 proposal-schema-valid 失败', async () => {
+    // clarify exit 不再校验 proposal schema，仅校验 prd
     const { guard, state } = await buildGuardWithProposal('只有正文\n\n没有标题\n');
     const result = await guard.checkExit('clarify', state);
-    const schemaFailure = result.failures.find((f) => f.check === 'proposal-schema-valid');
-    expect(schemaFailure).toBeDefined();
-    expect(schemaFailure?.severity).toBe('warning');
-    expect(schemaFailure?.message).toContain('proposal schema 校验失败');
+    expect(result.failures.some((f) => f.check === 'proposal-schema-valid')).toBe(false);
   });
 
-  it('proposal 内容为空时报 proposal-schema-valid warning', async () => {
+  it('proposal 内容为空时不报 proposal-schema-valid 失败', async () => {
+    // clarify exit 不再校验 proposal schema，仅校验 prd
     const { guard, state } = await buildGuardWithProposal('   \n  ');
     const result = await guard.checkExit('clarify', state);
-    const schemaFailure = result.failures.find((f) => f.check === 'proposal-schema-valid');
-    expect(schemaFailure).toBeDefined();
-    expect(schemaFailure?.severity).toBe('warning');
+    expect(result.failures.some((f) => f.check === 'proposal-schema-valid')).toBe(false);
   });
 
   it('未注入 SchemaRegistry 时跳过 schema 校验', async () => {
@@ -809,16 +807,13 @@ describe('P3-2 - PhaseGuard 集成 EARS Validator', () => {
     expect(result.failures.some((f) => f.check === 'ears-syntax')).toBe(false);
   });
 
-  it('spec 存在不符合 EARS 句式的语句时报 ears-syntax warning', async () => {
-    // "Logs shall be generated." 不以 "The system" 开头，不符合 EARS
+  it('spec 存在不符合 EARS 句式的语句时不报 ears-syntax 失败', async () => {
+    // clarify exit 不再校验 EARS 句式
     const { guard, state } = await buildGuardWithSpec(
       '# Spec\n\n## Requirements\n\nLogs shall be generated.\n',
     );
     const result = await guard.checkExit('clarify', state);
-    const earsFailure = result.failures.find((f) => f.check === 'ears-syntax');
-    expect(earsFailure).toBeDefined();
-    expect(earsFailure?.severity).toBe('warning');
-    expect(earsFailure?.message).toContain('EARS 句式建议');
+    expect(result.failures.some((f) => f.check === 'ears-syntax')).toBe(false);
   });
 
   it('spec 文件不存在时不报 ears-syntax 失败（best-effort）', async () => {
@@ -879,8 +874,7 @@ describe('P3-2 - PhaseGuard 集成 EARS Validator', () => {
 
     const result = await guard.checkExit('clarify', state);
     const earsFailures = result.failures.filter((f) => f.check === 'ears-syntax');
-    expect(earsFailures.length).toBe(1);
-    expect(earsFailures[0].message).toContain(spec2Path);
+    expect(earsFailures.length).toBe(0);
   });
 });
 
@@ -1104,10 +1098,10 @@ describe('Task 3 - PhaseGuard checkClarifyExit 章节结构校验', () => {
     await fs.promises.rm(tmpDir, { recursive: true, force: true });
   });
 
-  // 构造 guard 与 state：在 tmpDir 下创建模板文件与 proposal.md，注入真实 TemplateManager。
-  // templateContent 控制模板 frontmatter（是否声明 required_sections），proposalContent 控制 proposal 章节。
+  // 构造 guard 与 state：在 tmpDir 下创建模板文件与 prd.md，注入真实 TemplateManager。
+  // templateContent 控制模板 frontmatter（是否声明 required_sections），prdContent 控制 prd 章节。
   async function buildGuardWithTemplate(
-    proposalContent: string,
+    prdContent: string,
     templateContent: string,
   ) {
     const { PhaseGuardImpl } = await import('../src/core/phase-guard.js');
@@ -1115,40 +1109,34 @@ describe('Task 3 - PhaseGuard checkClarifyExit 章节结构校验', () => {
     const { TemplateManager } = await import('../src/core/template-manager.js');
     const { createDefaultState } = await import('../src/core/types.js');
 
-    // 创建模板文件 .driv/templates/proposals/default.md
+    // 创建模板文件 .driv/templates/prds/default.md
     await fs.promises.mkdir(
-      path.join(tmpDir, '.driv', 'templates', 'proposals'),
+      path.join(tmpDir, '.driv', 'templates', 'prds'),
       { recursive: true },
     );
     await fs.promises.writeFile(
-      path.join(tmpDir, '.driv', 'templates', 'proposals', 'default.md'),
+      path.join(tmpDir, '.driv', 'templates', 'prds', 'default.md'),
       templateContent,
     );
 
-    // 创建 proposal.md
-    const proposalPath = path.join('openspec', 'changes', changeName, 'proposal.md');
-    await fs.promises.mkdir(path.dirname(path.join(tmpDir, proposalPath)), { recursive: true });
-    await fs.promises.writeFile(path.join(tmpDir, proposalPath), proposalContent);
+    // 创建 prd.md
+    const prdPath = path.join('openspec', 'changes', changeName, 'prd.md');
+    await fs.promises.mkdir(path.dirname(path.join(tmpDir, prdPath)), { recursive: true });
+    await fs.promises.writeFile(path.join(tmpDir, prdPath), prdContent);
 
     const fsImpl = new FileSystem(tmpDir);
     const templateManager = new TemplateManager(fsImpl, tmpDir);
     // 第 5 个参数注入 templateManager
     const guard = new PhaseGuardImpl(undefined, undefined, fsImpl, undefined, templateManager);
     const state = createDefaultState(changeName);
-    state.openspec.proposal = proposalPath;
-    state.openspec.design = path.join('openspec', 'changes', changeName, 'design.md');
-    state.openspec.tasks = path.join('openspec', 'changes', changeName, 'tasks.md');
-    // specs 指向不存在的文件，EARS 校验 best-effort 跳过，避免引入额外 failure
-    state.openspec.specs = [
-      path.join('openspec', 'changes', changeName, 'specs', 'auth', 'spec.md'),
-    ];
+    state.openspec.prd = prdPath;
     state.phases.clarify.status = 'completed';
     return { guard, state };
   }
 
   const templateWithSections = [
     '---',
-    'template: proposal-default',
+    'template: prd-default',
     'version: 1.0',
     'required_sections:',
     '  - 背景与问题',
@@ -1157,17 +1145,17 @@ describe('Task 3 - PhaseGuard checkClarifyExit 章节结构校验', () => {
     '  - 验收标准',
     '---',
     '',
-    '# 变更提案模板',
+    '# PRD 模板',
     '',
     '## 背景与问题',
     '',
     '模板内容',
   ].join('\n');
 
-  it('proposal.md 缺失必填章节时产生 advisory 级别 failure，passed 仍为 true', async () => {
-    // proposal 包含前 3 个章节，故意缺少 ## 验收标准
-    const proposalContent = [
-      '# 提案',
+  it('prd.md 缺失必填章节时产生 advisory 级别 failure，passed 仍为 true', async () => {
+    // prd 包含前 3 个章节，故意缺少 ## 验收标准
+    const prdContent = [
+      '# PRD',
       '',
       '## 背景与问题',
       '',
@@ -1181,20 +1169,20 @@ describe('Task 3 - PhaseGuard checkClarifyExit 章节结构校验', () => {
       '',
       '内容',
     ].join('\n');
-    const { guard, state } = await buildGuardWithTemplate(proposalContent, templateWithSections);
+    const { guard, state } = await buildGuardWithTemplate(prdContent, templateWithSections);
 
     const result = await guard.checkExit('clarify', state);
 
-    const sectionFailure = result.failures.find((f) => f.check === 'proposal_section_验收标准');
+    const sectionFailure = result.failures.find((f) => f.check === 'prd_section_验收标准');
     expect(sectionFailure).toBeDefined();
     expect(sectionFailure?.severity).toBe('warning');
     // advisory 级别不阻断：passed 仍为 true
     expect(result.passed).toBe(true);
   });
 
-  it('proposal.md 包含所有必填章节时不产生章节相关 failure', async () => {
-    const proposalContent = [
-      '# 提案',
+  it('prd.md 包含所有必填章节时不产生章节相关 failure', async () => {
+    const prdContent = [
+      '# PRD',
       '',
       '## 背景与问题',
       '',
@@ -1212,12 +1200,12 @@ describe('Task 3 - PhaseGuard checkClarifyExit 章节结构校验', () => {
       '',
       '内容',
     ].join('\n');
-    const { guard, state } = await buildGuardWithTemplate(proposalContent, templateWithSections);
+    const { guard, state } = await buildGuardWithTemplate(prdContent, templateWithSections);
 
     const result = await guard.checkExit('clarify', state);
 
     const sectionFailures = result.failures.filter((f) =>
-      f.check.startsWith('proposal_section_'),
+      f.check.startsWith('prd_section_'),
     );
     expect(sectionFailures).toHaveLength(0);
     // 无 error failure，passed 应为 true
@@ -1226,14 +1214,14 @@ describe('Task 3 - PhaseGuard checkClarifyExit 章节结构校验', () => {
 
   it('模板无 required_sections 时跳过章节校验（向后兼容）', async () => {
     // 模板无 frontmatter，无 required_sections 声明
-    const templateNoSections = '# 变更提案模板\n\n## 概述\n\n{{x}}\n';
-    const proposalContent = '# 提案\n\n仅有正文，无任何必填章节\n';
-    const { guard, state } = await buildGuardWithTemplate(proposalContent, templateNoSections);
+    const templateNoSections = '# PRD 模板\n\n## 概述\n\n{{x}}\n';
+    const prdContent = '# PRD\n\n仅有正文，无任何必填章节\n';
+    const { guard, state } = await buildGuardWithTemplate(prdContent, templateNoSections);
 
     const result = await guard.checkExit('clarify', state);
 
     const sectionFailures = result.failures.filter((f) =>
-      f.check.startsWith('proposal_section_'),
+      f.check.startsWith('prd_section_'),
     );
     expect(sectionFailures).toHaveLength(0);
   });
@@ -1243,16 +1231,12 @@ describe('Task 3 - PhaseGuard checkClarifyExit 章节结构校验', () => {
     const { createDefaultState } = await import('../src/core/types.js');
     const guard = new PhaseGuardImpl();
     const state = createDefaultState(changeName);
-    state.openspec.proposal = 'openspec/changes/test/proposal.md';
-    state.openspec.design = 'design.md';
-    state.openspec.tasks = 'tasks.md';
-    state.openspec.specs = ['openspec/changes/test/specs/auth/spec.md'];
     state.phases.clarify.status = 'completed';
 
     const result = await guard.checkExit('clarify', state);
 
     const sectionFailures = result.failures.filter((f) =>
-      f.check.startsWith('proposal_section_'),
+      f.check.startsWith('prd_section_'),
     );
     expect(sectionFailures).toHaveLength(0);
   });

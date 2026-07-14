@@ -16,5 +16,7 @@ describe('ContextRecovery', () => {
     const result = await recovery.recover({});
     expect(result.change).toBe('unknown');
     expect(result.partial).toBe(true);
+    // data.phase 未提供，tasksProgress 为 missing
+    expect(result.tasksProgress).toBe('missing');
   });
 });
