@@ -1091,3 +1091,169 @@ describe('delta-spec-parser 单元测试', () => {
     expect(delta.removed).toHaveLength(0);
   });
 });
+
+describe('Task 3 - PhaseGuard checkClarifyExit 章节结构校验', () => {
+  let tmpDir: string;
+  const changeName = 'section-test-change';
+
+  beforeEach(async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'driv-phase-guard-section-'));
+  });
+
+  afterEach(async () => {
+    await fs.promises.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  // 构造 guard 与 state：在 tmpDir 下创建模板文件与 proposal.md，注入真实 TemplateManager。
+  // templateContent 控制模板 frontmatter（是否声明 required_sections），proposalContent 控制 proposal 章节。
+  async function buildGuardWithTemplate(
+    proposalContent: string,
+    templateContent: string,
+  ) {
+    const { PhaseGuardImpl } = await import('../src/core/phase-guard.js');
+    const { FileSystem } = await import('../src/utils/file-system.js');
+    const { TemplateManager } = await import('../src/core/template-manager.js');
+    const { createDefaultState } = await import('../src/core/types.js');
+
+    // 创建模板文件 .driv/templates/proposals/default.md
+    await fs.promises.mkdir(
+      path.join(tmpDir, '.driv', 'templates', 'proposals'),
+      { recursive: true },
+    );
+    await fs.promises.writeFile(
+      path.join(tmpDir, '.driv', 'templates', 'proposals', 'default.md'),
+      templateContent,
+    );
+
+    // 创建 proposal.md
+    const proposalPath = path.join('openspec', 'changes', changeName, 'proposal.md');
+    await fs.promises.mkdir(path.dirname(path.join(tmpDir, proposalPath)), { recursive: true });
+    await fs.promises.writeFile(path.join(tmpDir, proposalPath), proposalContent);
+
+    const fsImpl = new FileSystem(tmpDir);
+    const templateManager = new TemplateManager(fsImpl, tmpDir);
+    // 第 5 个参数注入 templateManager
+    const guard = new PhaseGuardImpl(undefined, undefined, fsImpl, undefined, templateManager);
+    const state = createDefaultState(changeName);
+    state.openspec.proposal = proposalPath;
+    state.openspec.design = path.join('openspec', 'changes', changeName, 'design.md');
+    state.openspec.tasks = path.join('openspec', 'changes', changeName, 'tasks.md');
+    // specs 指向不存在的文件，EARS 校验 best-effort 跳过，避免引入额外 failure
+    state.openspec.specs = [
+      path.join('openspec', 'changes', changeName, 'specs', 'auth', 'spec.md'),
+    ];
+    state.phases.clarify.status = 'completed';
+    return { guard, state };
+  }
+
+  const templateWithSections = [
+    '---',
+    'template: proposal-default',
+    'version: 1.0',
+    'required_sections:',
+    '  - 背景与问题',
+    '  - 目标与非目标',
+    '  - 变更范围',
+    '  - 验收标准',
+    '---',
+    '',
+    '# 变更提案模板',
+    '',
+    '## 背景与问题',
+    '',
+    '模板内容',
+  ].join('\n');
+
+  it('proposal.md 缺失必填章节时产生 advisory 级别 failure，passed 仍为 true', async () => {
+    // proposal 包含前 3 个章节，故意缺少 ## 验收标准
+    const proposalContent = [
+      '# 提案',
+      '',
+      '## 背景与问题',
+      '',
+      '内容',
+      '',
+      '## 目标与非目标',
+      '',
+      '内容',
+      '',
+      '## 变更范围',
+      '',
+      '内容',
+    ].join('\n');
+    const { guard, state } = await buildGuardWithTemplate(proposalContent, templateWithSections);
+
+    const result = await guard.checkExit('clarify', state);
+
+    const sectionFailure = result.failures.find((f) => f.check === 'proposal_section_验收标准');
+    expect(sectionFailure).toBeDefined();
+    expect(sectionFailure?.severity).toBe('warning');
+    // advisory 级别不阻断：passed 仍为 true
+    expect(result.passed).toBe(true);
+  });
+
+  it('proposal.md 包含所有必填章节时不产生章节相关 failure', async () => {
+    const proposalContent = [
+      '# 提案',
+      '',
+      '## 背景与问题',
+      '',
+      '内容',
+      '',
+      '## 目标与非目标',
+      '',
+      '内容',
+      '',
+      '## 变更范围',
+      '',
+      '内容',
+      '',
+      '## 验收标准',
+      '',
+      '内容',
+    ].join('\n');
+    const { guard, state } = await buildGuardWithTemplate(proposalContent, templateWithSections);
+
+    const result = await guard.checkExit('clarify', state);
+
+    const sectionFailures = result.failures.filter((f) =>
+      f.check.startsWith('proposal_section_'),
+    );
+    expect(sectionFailures).toHaveLength(0);
+    // 无 error failure，passed 应为 true
+    expect(result.passed).toBe(true);
+  });
+
+  it('模板无 required_sections 时跳过章节校验（向后兼容）', async () => {
+    // 模板无 frontmatter，无 required_sections 声明
+    const templateNoSections = '# 变更提案模板\n\n## 概述\n\n{{x}}\n';
+    const proposalContent = '# 提案\n\n仅有正文，无任何必填章节\n';
+    const { guard, state } = await buildGuardWithTemplate(proposalContent, templateNoSections);
+
+    const result = await guard.checkExit('clarify', state);
+
+    const sectionFailures = result.failures.filter((f) =>
+      f.check.startsWith('proposal_section_'),
+    );
+    expect(sectionFailures).toHaveLength(0);
+  });
+
+  it('未注入 TemplateManager 时跳过章节校验（向后兼容）', async () => {
+    const { PhaseGuardImpl } = await import('../src/core/phase-guard.js');
+    const { createDefaultState } = await import('../src/core/types.js');
+    const guard = new PhaseGuardImpl();
+    const state = createDefaultState(changeName);
+    state.openspec.proposal = 'openspec/changes/test/proposal.md';
+    state.openspec.design = 'design.md';
+    state.openspec.tasks = 'tasks.md';
+    state.openspec.specs = ['openspec/changes/test/specs/auth/spec.md'];
+    state.phases.clarify.status = 'completed';
+
+    const result = await guard.checkExit('clarify', state);
+
+    const sectionFailures = result.failures.filter((f) =>
+      f.check.startsWith('proposal_section_'),
+    );
+    expect(sectionFailures).toHaveLength(0);
+  });
+});

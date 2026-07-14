@@ -6,6 +6,10 @@ placeholders_required:
   - capability_name
   - spec_version
   - spec_owner
+required_sections:
+  - 规格概述
+  - 能力详述
+  - 行为规格
 ---
 
 # 能力规格说明书：{{capability_name}}

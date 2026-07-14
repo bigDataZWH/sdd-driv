@@ -8,6 +8,10 @@ placeholders_required:
   - design_version
   - designer
   - design_date
+required_sections:
+  - 方案概述
+  - 总体架构设计
+  - 详细设计
 ---
 
 # 技术设计方案：{{change_name}}

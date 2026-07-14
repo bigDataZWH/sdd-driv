@@ -2,6 +2,10 @@
 template: proposal-bugfix
 version: 1.0
 extends: proposal-default
+required_sections:
+  - 背景与问题
+  - 目标与非目标
+  - 验收标准
 ---
 
 # 缺陷修复提案：{{change_name}}

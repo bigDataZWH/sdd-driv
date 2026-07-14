@@ -222,6 +222,19 @@ export class TemplateManager {
     return this.frontmatterCache.get(`${type}/${name}`) ?? null;
   }
 
+  // 返回模板 frontmatter 中声明的 required_sections 列表。
+  // 内部先调用 loadTemplate 确保 frontmatter 缓存已填充；无声明或模板无 frontmatter 时返回空数组。
+  async getRequiredSections(type: TemplateType, name: string): Promise<string[]> {
+    await this.loadTemplate(type, name);
+    const frontmatter = this.getTemplateFrontmatter(type, name);
+    if (!frontmatter) return [];
+    const required = frontmatter.required_sections;
+    if (Array.isArray(required)) {
+      return required.filter((s): s is string => typeof s === 'string');
+    }
+    return [];
+  }
+
   private templatesDir(): string {
     return path.join(this.root, '.driv', 'templates');
   }

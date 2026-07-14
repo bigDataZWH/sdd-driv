@@ -2,6 +2,11 @@
 template: proposal-refactor
 version: 1.0
 extends: proposal-default
+required_sections:
+  - 背景与问题
+  - 目标与非目标
+  - 变更范围
+  - 验收标准
 ---
 
 # 重构变更提案：{{change_name}}

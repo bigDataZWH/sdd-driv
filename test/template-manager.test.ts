@@ -1303,4 +1303,61 @@ describe('TemplateManager', () => {
       expect(readFileSpy.mock.calls.length).toBeGreaterThan(beforeClear);
     });
   });
+
+  // ── Task 2: getRequiredSections 接口 ──
+  describe('Task 2 getRequiredSections', () => {
+    it('返回模板 frontmatter 中声明的 required_sections 列表', async () => {
+      // 覆盖 default.md，在 frontmatter 中声明 required_sections
+      await fs.promises.writeFile(
+        path.join(TMPL_DIR, 'proposals', 'default.md'),
+        [
+          '---',
+          'template: proposal-default',
+          'version: 1.0',
+          'placeholders_required:',
+          '  - change_name',
+          'required_sections:',
+          '  - 背景与问题',
+          '  - 目标与非目标',
+          '  - 变更范围',
+          '  - 验收标准',
+          '---',
+          '',
+          '# 变更提案',
+          '',
+          '## 背景与问题',
+          '',
+          '内容',
+        ].join('\n'),
+      );
+      const fsInstance = new FileSystemClass(TMP_DIR);
+      const tm = new TemplateManagerClass(fsInstance, TMP_DIR);
+      const sections = await tm.getRequiredSections('proposal', 'default');
+      expect(sections).toEqual([
+        '背景与问题',
+        '目标与非目标',
+        '变更范围',
+        '验收标准',
+      ]);
+    });
+
+    it('模板无 frontmatter 时返回空数组（不抛错）', async () => {
+      const fsInstance = new FileSystemClass(TMP_DIR);
+      const tm = new TemplateManagerClass(fsInstance, TMP_DIR);
+      // bugfix.md 由 beforeEach 创建，无 frontmatter
+      const sections = await tm.getRequiredSections('proposal', 'bugfix');
+      expect(sections).toEqual([]);
+    });
+
+    it('模板有 frontmatter 但未声明 required_sections 时返回空数组', async () => {
+      await fs.promises.writeFile(
+        path.join(TMPL_DIR, 'proposals', 'fm-no-sections.md'),
+        '---\ntemplate: fm-no-sections\nversion: 1.0\n---\n\n# 测试\n\n{{x}}\n',
+      );
+      const fsInstance = new FileSystemClass(TMP_DIR);
+      const tm = new TemplateManagerClass(fsInstance, TMP_DIR);
+      const sections = await tm.getRequiredSections('proposal', 'fm-no-sections');
+      expect(sections).toEqual([]);
+    });
+  });
 });

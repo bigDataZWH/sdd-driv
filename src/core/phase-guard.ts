@@ -4,6 +4,7 @@ import { HandoffManager } from './handoff-manager.js';
 import { FileSystem } from '../utils/file-system.js';
 import { SchemaRegistry } from './schema-registry.js';
 import { validateEARS } from './ears-validator.js';
+import type { TemplateManager } from './template-manager.js';
 import * as path from 'path';
 
 export type ReviewType = 'requirement' | 'technical' | 'code';
@@ -43,7 +44,9 @@ function buildResult(
   direction: 'entry' | 'exit',
   failures: GuardFailure[],
 ): GuardResult {
-  return { phase, direction, passed: failures.length === 0, failures };
+  // passed 仅由 error 级 failure 决定，warning 级（advisory）不阻断
+  const hasError = failures.some((f) => f.severity === 'error');
+  return { phase, direction, passed: !hasError, failures };
 }
 
 function fail(
@@ -64,6 +67,7 @@ export class PhaseGuardImpl implements PhaseGuard {
     private handoffManager?: HandoffManager,
     private fs?: FileSystem,
     private schemaRegistry?: SchemaRegistry,
+    private templateManager?: TemplateManager,
   ) {}
 
   private resolvePath(p: string): string {
@@ -425,6 +429,35 @@ export class PhaseGuardImpl implements PhaseGuard {
         } catch {
           // best-effort
         }
+      }
+    }
+
+    // advisory: proposal 章节结构校验（best-effort，不阻断）
+    if (state.openspec.proposal && this.templateManager && this.fs) {
+      try {
+        const proposalPath = this.resolvePath(state.openspec.proposal);
+        if (await this.fs.exists(proposalPath)) {
+          const content = await this.fs.readFile(proposalPath);
+          const requiredSections = await this.templateManager.getRequiredSections(
+            'proposal',
+            'default',
+          );
+          for (const section of requiredSections) {
+            if (!content.includes(`## ${section}`)) {
+              failures.push(
+                fail(
+                  `proposal_section_${section}`,
+                  `proposal 包含章节: ${section}`,
+                  '缺失',
+                  'warning',
+                  `proposal 缺少必填章节: ${section}，请参考 .driv/templates/proposals/default.md 模板结构`,
+                ),
+              );
+            }
+          }
+        }
+      } catch {
+        // best-effort，校验失败静默跳过
       }
     }
 

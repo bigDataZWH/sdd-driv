@@ -2,6 +2,10 @@
 template: proposal-feature
 version: 1.0
 extends: proposal-default
+required_sections:
+  - 用户问题与场景
+  - 功能目标
+  - 验收标准
 ---
 
 # 功能变更提案：{{change_name}}

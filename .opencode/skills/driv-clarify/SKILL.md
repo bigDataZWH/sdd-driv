@@ -28,22 +28,31 @@ description: 需求澄清 - 通过 openspec-explore 多轮对话，生成完整 
 
 2. **存量分析** — 若用户提供代码仓地址，分析现有功能结构和代码质量
 3. **生成 Change 名称** — 从输入推导 kebab-case change 名称，确保 `openspec/changes/<name>/` 存在
-4. **生成 proposal.md** — 使用 `.driv/templates/proposals/default.md` 模板，包含 8 条验收标准
+4. **生成 proposal.md** — **必须读取 `.driv/templates/proposals/default.md` 模板作为结构骨架**，包含以下必填章节（不得遗漏）：
+   - `## 背景与问题` — 当前问题与业务价值
+   - `## 目标与非目标` — 明确范围内/范围外
+   - `## 变更范围` — 受影响对象与代码范围
+   - `## 验收标准` — 可验证的验收条件（至少 8 条）
    - **必须包含 `## Intent` 章节** — 一句话锁定本次变更核心意图（如：'修复用户登录超时 bug，不改变现有 API 签名'）。该意图将在 Design→Build 边界作为意图锁（Intent Lock）用于 design.md 对齐校验。
+   - PhaseGuard 会对 proposal.md 进行章节结构校验（advisory 级别），缺失必填章节会产生警告
 
 **⚠️ Decision Point DP-1: 提案确认**
 - 暂停工作流，向用户展示当前产出件
 - 等待用户确认（confirmed）后再进入下一步
 - 用户拒绝时返回当前步骤修改，不进入下一阶段
 
-5. **生成 tasks.md** — 任务清单（跨 5 阶段，约 22 项）
+5. **生成 tasks.md** — 任务清单（跨 5 阶段，约 22 项），**建议参考 `.driv/templates/` 下的任务清单结构**，每项任务需可验证
 
 **⚠️ Decision Point DP-4: 任务确认**
 - 暂停工作流，向用户展示当前产出件
 - 等待用户确认（confirmed）后再进入下一步
 - 用户拒绝时返回当前步骤修改，不进入下一阶段
 
-6. **生成 specs/<capability>/spec.md** — 能力规格（行为场景描述），由 AI 直接基于 OpenSpec 模板生成，不经过 design-to-spec-converter 转换
+6. **生成 specs/<capability>/spec.md** — 能力规格（行为场景描述），**必须参考 `.driv/templates/specs/default.md` 模板结构**，包含以下必填章节：
+   - `## 规格概述` — 能力基本信息
+   - `## 能力详述` — 能力详细说明
+   - `## 行为规格` — 行为场景（GIVEN/WHEN/THEN）
+   - 由 AI 直接基于 OpenSpec 模板生成，不经过 design-to-spec-converter 转换
 
 **⚠️ Decision Point DP-2: 规格确认**
 - 暂停工作流，向用户展示当前产出件
