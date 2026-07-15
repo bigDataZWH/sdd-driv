@@ -375,7 +375,12 @@ export class PhaseGuardImpl implements PhaseGuard {
             'default',
           );
           for (const section of requiredSections) {
-            if (!content.includes(`## ${section}`)) {
+            // 支持中文序号前缀的章节标题：## 二、需求概述 / ## 2. 需求概述 / ## 需求概述
+            const sectionRegex = new RegExp(
+              `^##\\s+(?:[一二三四五六七八九十百]+|[0-9]+[、.．])?\\s*${section.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`,
+              'm',
+            );
+            if (!content.match(sectionRegex)) {
               failures.push(
                 fail(
                   `prd_section_${section}`,
