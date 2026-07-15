@@ -7,11 +7,6 @@ placeholders_required:
   - change_type
   - proposer
   - created_at
-required_sections:
-  - 背景与问题
-  - 目标与非目标
-  - 变更范围
-  - 验收标准
 ---
 
 # 变更提案：{{change_name}}

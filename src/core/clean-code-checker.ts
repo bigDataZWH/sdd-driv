@@ -28,14 +28,6 @@ interface RuleCategory {
   weight: number;
 }
 
-const MAX_FUNCTION_LENGTH = 50;
-const MAX_CLASS_LENGTH = 500;
-const MAX_NESTING_DEPTH = 4;
-const MAX_PARAMS = 5;
-const MAX_CYCLOMATIC = 10;
-const PASS_SCORE = 80;
-const DUPLICATE_BLOCK_SIZE = 5;
-
 const CATEGORIES: Record<string, RuleCategory> = {
   naming: { rules: ['class-pascal-case', 'var-camel-case', 'const-upper-snake-case'], weight: 15 },
   function: { rules: ['function-length', 'param-count', 'cyclomatic-complexity'], weight: 25 },
@@ -182,86 +174,51 @@ function findBlockStart(lines: string[], fromLine: number): number {
 }
 
 function findMatchingBrace(lines: string[], startLine: number): number {
-  const content = lines.join('\n');
-  let offset = 0;
-  for (let i = 0; i < startLine; i++) {
-    offset += lines[i].length + 1;
-  }
-
-  let inString = false;
-  let stringChar = '';
-  let inLineComment = false;
-  let inBlockComment = false;
   let depth = 0;
   let started = false;
-  let i = offset;
-
-  while (i < content.length) {
-    const char = content[i];
-    const nextChar = content[i + 1];
-
-    if (inLineComment) {
-      if (char === '\n') inLineComment = false;
-      i++;
-      continue;
-    }
-    if (inBlockComment) {
-      if (char === '*' && nextChar === '/') {
-        inBlockComment = false;
-        i += 2;
-        continue;
-      }
-      i++;
-      continue;
-    }
-    if (!inString) {
-      if (char === '/' && nextChar === '/') {
+  let inString: false | '"' | "'" | '`' = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+  for (let i = startLine; i < lines.length; i++) {
+    if (inLineComment) inLineComment = false; // 新行重置行注释
+    for (let j = 0; j < lines[i].length; j++) {
+      const ch = lines[i][j];
+      const next = lines[i][j + 1];
+      // 处理注释
+      if (!inString && !inBlockComment && ch === '/' && next === '/') {
         inLineComment = true;
-        i += 2;
-        continue;
+        break; // 行剩余部分是注释
       }
-      if (char === '/' && nextChar === '*') {
+      if (!inString && !inLineComment && ch === '/' && next === '*') {
         inBlockComment = true;
-        i += 2;
+        j++; // 跳过 *
         continue;
       }
-    }
-    if (inString) {
-      if (char === '\\') {
-        i += 2;
+      if (inBlockComment && ch === '*' && next === '/') {
+        inBlockComment = false;
+        j++; // 跳过 /
         continue;
       }
-      if (char === stringChar) {
+      if (inBlockComment || inLineComment) continue;
+      // 处理字符串
+      if (!inString && (ch === '"' || ch === "'" || ch === '`')) {
+        inString = ch;
+        continue;
+      }
+      if (inString && ch === inString && lines[i][j - 1] !== '\\') {
         inString = false;
+        continue;
       }
-      i++;
-      continue;
-    }
-    if (char === '"' || char === "'" || char === '`') {
-      inString = true;
-      stringChar = char;
-      i++;
-      continue;
-    }
-    if (char === '{') {
-      depth++;
-      started = true;
-    } else if (char === '}') {
-      depth--;
-    }
-    i++;
-    if (started && depth === 0) {
-      const braceIdx = i - 1;
-      let charPos = 0;
-      for (let li = 0; li < lines.length; li++) {
-        const lineEnd = charPos + lines[li].length;
-        if (braceIdx >= charPos && braceIdx <= lineEnd) {
-          return li;
-        }
-        charPos = lineEnd + 1;
+      if (inString) continue;
+      // 统计真实 { }
+      if (ch === '{') {
+        depth++;
+        started = true;
+      } else if (ch === '}') {
+        depth--;
       }
-      return -1;
     }
+    if (started && depth === 0 && !inBlockComment) return i;
   }
   return -1;
 }
@@ -271,13 +228,13 @@ function checkFunctionLength(content: string, filePath?: string): CodeIssue[] {
   const funcs = findFunctionBodies(content);
   for (const f of funcs) {
     const lineCount = f.bodyEnd - f.bodyStart + 1;
-    if (lineCount > MAX_FUNCTION_LENGTH) {
+    if (lineCount > 50) {
       const funcLine = content.split('\n')[f.startLine]?.trim() || 'anonymous';
       issues.push(
         makeIssue(
           'function-length',
           'major',
-          `函数 "${funcLine}" 有 ${lineCount} 行（超过 ${MAX_FUNCTION_LENGTH} 行限制）`,
+          `函数 "${funcLine}" 有 ${lineCount} 行（超过 50 行限制）`,
           filePath,
           f.startLine + 1,
         ),
@@ -299,13 +256,13 @@ function checkParamCount(content: string, filePath?: string): CodeIssue[] {
           .map((p) => p.trim())
           .filter(Boolean).length
       : 0;
-    if (count > MAX_PARAMS) {
+    if (count > 5) {
       const lineNum = content.slice(0, m.index).split('\n').length;
       issues.push(
         makeIssue(
           'param-count',
           'major',
-          `函数有 ${count} 个参数（超过 ${MAX_PARAMS} 个限制）`,
+          `函数有 ${count} 个参数（超过 5 个限制）`,
           filePath,
           lineNum,
         ),
@@ -321,13 +278,13 @@ function checkParamCount(content: string, filePath?: string): CodeIssue[] {
           .map((p) => p.trim())
           .filter(Boolean).length
       : 0;
-    if (count > MAX_PARAMS) {
+    if (count > 5) {
       const lineNum = content.slice(0, m.index).split('\n').length;
       issues.push(
         makeIssue(
           'param-count',
           'major',
-          `箭头函数有 ${count} 个参数（超过 ${MAX_PARAMS} 个限制）`,
+          `箭头函数有 ${count} 个参数（超过 5 个限制）`,
           filePath,
           lineNum,
         ),
@@ -364,13 +321,13 @@ function checkCyclomaticComplexity(content: string, filePath?: string): CodeIssu
         complexity++;
       }
     }
-    if (complexity > MAX_CYCLOMATIC) {
+    if (complexity > 10) {
       const funcLine = content.split('\n')[f.startLine]?.trim() || 'anonymous';
       issues.push(
         makeIssue(
           'cyclomatic-complexity',
           'major',
-          `函数 "${funcLine}" 圈复杂度为 ${complexity}（超过 ${MAX_CYCLOMATIC} 限制）`,
+          `函数 "${funcLine}" 圈复杂度为 ${complexity}（超过 10 限制）`,
           filePath,
           f.startLine + 1,
         ),
@@ -419,12 +376,12 @@ function checkClassLength(content: string, filePath?: string): CodeIssue[] {
   const classes = findClassBlocks(content);
   for (const c of classes) {
     const lineCount = c.endLine - c.startLine + 1;
-    if (lineCount > MAX_CLASS_LENGTH) {
+    if (lineCount > 500) {
       issues.push(
         makeIssue(
           'class-length',
           'major',
-          `类 "${c.name}" 有 ${lineCount} 行（超过 ${MAX_CLASS_LENGTH} 行限制）`,
+          `类 "${c.name}" 有 ${lineCount} 行（超过 500 行限制）`,
           filePath,
           c.startLine + 1,
         ),
@@ -446,14 +403,9 @@ function checkNestingDepth(content: string, filePath?: string): CodeIssue[] {
     }
     if (currentDepth > maxDepth) maxDepth = currentDepth;
   }
-  if (maxDepth > MAX_NESTING_DEPTH) {
+  if (maxDepth > 4) {
     issues.push(
-      makeIssue(
-        'nesting-depth',
-        'major',
-        `代码嵌套深度为 ${maxDepth}（超过 ${MAX_NESTING_DEPTH} 层限制）`,
-        filePath,
-      ),
+      makeIssue('nesting-depth', 'major', `代码嵌套深度为 ${maxDepth}（超过 4 层限制）`, filePath),
     );
   }
   return issues;
@@ -462,7 +414,7 @@ function checkNestingDepth(content: string, filePath?: string): CodeIssue[] {
 function checkDuplicateCode(content: string, filePath?: string): CodeIssue[] {
   const issues: CodeIssue[] = [];
   const lines = content.split('\n');
-  const minBlock = DUPLICATE_BLOCK_SIZE;
+  const minBlock = 5;
   const seen = new Map<string, number[]>();
   for (let i = 0; i <= lines.length - minBlock; i++) {
     const block = lines.slice(i, i + minBlock).join('\n');
@@ -618,7 +570,7 @@ function calculateScore(issues: CodeIssue[]): {
 
   const rawTotal = Object.values(categoryScores).reduce((s, v) => s + v, 0);
   const normalizedScore = Math.round((rawTotal / MAX_RAW) * 100);
-  const passed = normalizedScore >= PASS_SCORE && !hasCritical;
+  const passed = normalizedScore >= 80 && !hasCritical;
 
   return { score: normalizedScore, passed, categoryScores };
 }
@@ -750,6 +702,13 @@ export class CleanCodeChecker {
       issuesJson,
       'utf-8',
     );
+
+    const fixHistory: unknown[] = [];
+    await fs.promises.writeFile(
+      path.join(outputDir, 'clean-code-fix-history.json'),
+      JSON.stringify(fixHistory, null, 2),
+      'utf-8',
+    );
   }
 
   private generateMarkdownReport(result: CleanCodeResult): string {
@@ -804,11 +763,11 @@ export class CleanCodeChecker {
     lines.push('## 通过条件');
     lines.push('');
     if (result.passed) {
-      lines.push(`✅ **通过**: 总分 ≥${PASS_SCORE} 且无未修复的 critical 问题`);
+      lines.push('✅ **通过**: 总分 ≥80 且无未修复的 critical 问题');
     } else {
       const criticalCount = result.issues.filter((i) => i.severity === 'critical').length;
-      if (result.score < PASS_SCORE) {
-        lines.push(`❌ **未通过**: 总分 ${result.score} < ${PASS_SCORE}`);
+      if (result.score < 80) {
+        lines.push(`❌ **未通过**: 总分 ${result.score} < 80`);
       }
       if (criticalCount > 0) {
         lines.push(`❌ **未通过**: 存在 ${criticalCount} 个 critical 问题`);

@@ -4,7 +4,6 @@ import { StateMachine } from './state-machine.js';
 import { GitOps } from './git-ops.js';
 import { PathResolver } from './path-resolver.js';
 import { HandoffManager } from './handoff-manager.js';
-import { ChangeState } from './types.js';
 
 export interface BuildModeConfig {
   buildMode: string;
@@ -40,8 +39,19 @@ export class BuildOrchestrator {
     const relativePath = `openspec/changes/${changeName}/plan.md`;
     const absolutePath = path.join(this.pathResolver.root, relativePath);
 
-    const handoff = await this.handoffManager.generate(changeName, 'design');
-    const planContent = this.generatePlanContent(state, handoff.verification.totalHash);
+    // 修复：优先复用已有的 handoff 包，避免重复生成破坏 hash 链
+    // 原 createPlan 每次调用都 handoffManager.generate()，会覆盖已有 handoff.json
+    // 的时间戳和 hash，导致 Build 入口 hash 校验链断裂
+    let handoffHash: string;
+    const existingHandoff = await this.handoffManager.getHandoffPackage(changeName);
+    if (existingHandoff) {
+      handoffHash = existingHandoff.verification.totalHash;
+    } else {
+      const fresh = await this.handoffManager.generate(changeName, 'design');
+      handoffHash = fresh.verification.totalHash;
+    }
+
+    const planContent = this.generatePlanContent(state, handoffHash);
 
     await this.fs.writeFile(absolutePath, planContent);
     await this.stateMachine.setField(changeName, 'superpowers.plan', relativePath);
@@ -68,7 +78,7 @@ export class BuildOrchestrator {
     }
   }
 
-  private generatePlanContent(state: ChangeState, handoffHash: string): string {
+  private generatePlanContent(state: any, handoffHash: string): string {
     const today = new Date().toISOString().slice(0, 10);
     const lines: string[] = [
       '---',

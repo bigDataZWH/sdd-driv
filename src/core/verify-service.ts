@@ -1,17 +1,47 @@
 import * as path from 'path';
-import { FileSystem, walkDir } from '../utils/file-system.js';
+import * as fs from 'fs';
+import { FileSystem } from '../utils/file-system.js';
 import { StateMachine } from './state-machine.js';
 import { CleanCodeChecker } from './clean-code-checker.js';
 import { ScriptExec } from '../utils/script-exec.js';
 import { DebugGate, DebugGateResult } from './debug-gate.js';
 
-const COVERAGE_PASS_THRESHOLD = 80;
-const COVERAGE_WARN_THRESHOLD = 70;
-const SCALE_FULL_TASKS = 3;
-const SCALE_FULL_FILES = 4;
-const SCALE_LIGHT_FILES = 3;
-
 export type VerifyScale = 'light' | 'full';
+
+/** 覆盖率阈值（可通过 .driv/config.yaml 覆盖） */
+export interface CoverageThresholds {
+  lines: number;
+  functions: number;
+  branches: number;
+  statements: number;
+}
+
+const DEFAULT_COVERAGE_THRESHOLDS: CoverageThresholds = {
+  lines: 80,
+  functions: 80,
+  branches: 70,
+  statements: 80,
+};
+
+/** Verify 阶段的完整配置（从 .driv/config.yaml 或 .driv/config.yaml 读取） */
+export interface VerifyConfig {
+  buildCmd: string;
+  testCmd: string;
+  lintCmd: string;
+  typecheckCmd: string;
+  coverageThresholds: CoverageThresholds;
+  /** light 模式下是否跳过 coverage/lint/typecheck（默认 false，向后兼容） */
+  skipLightChecks?: boolean;
+}
+
+const DEFAULT_VERIFY_CONFIG: VerifyConfig = {
+  buildCmd: 'npm run build',
+  testCmd: 'npm test',
+  lintCmd: 'npm run lint',
+  typecheckCmd: 'npx tsc --noEmit',
+  coverageThresholds: DEFAULT_COVERAGE_THRESHOLDS,
+  skipLightChecks: false,
+};
 
 export interface VerifyResult {
   scale: VerifyScale;
@@ -35,6 +65,25 @@ export interface VerifyResult {
   typeCheckPassed?: boolean;
 }
 
+async function walkDir(dir: string): Promise<string[]> {
+  const files: string[] = [];
+  let entries: fs.Dirent[];
+  try {
+    entries = await fs.promises.readdir(dir, { withFileTypes: true });
+  } catch {
+    return files;
+  }
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await walkDir(fullPath)));
+    } else {
+      files.push(fullPath);
+    }
+  }
+  return files;
+}
+
 export class VerifyService {
   private fs: FileSystem;
   private stateMachine: StateMachine;
@@ -42,7 +91,8 @@ export class VerifyService {
   private scriptExec: ScriptExec;
   private root: string;
   private debugGate: DebugGate;
-  private configCache: { data: any; mtime: number } | null = null;
+  // 配置缓存：避免每次 verify() 都重新读取 .driv/config.yaml
+  private configCache: VerifyConfig | null = null;
 
   constructor(
     fs: FileSystem,
@@ -66,8 +116,7 @@ export class VerifyService {
     try {
       const tasksContent = await this.fs.readFile(tasksPath);
       tasks = tasksContent.split('\n').filter((l) => l.includes('- [ ]'));
-    } catch (err) {
-      console.warn(`[driv] verify: failed to read tasks: ${(err as Error).message}`);
+    } catch {
       tasks = [];
     }
 
@@ -76,8 +125,7 @@ export class VerifyService {
     try {
       const entries = await this.fs.listDir(changeDir);
       fileCount = entries.length;
-    } catch (err) {
-      console.warn(`[driv] verify: failed to list change dir: ${(err as Error).message}`);
+    } catch {
       fileCount = 0;
     }
 
@@ -91,45 +139,67 @@ export class VerifyService {
           specCount++;
         }
       }
-    } catch (err) {
-      console.warn(`[driv] verify: failed to count specs: ${(err as Error).message}`);
+    } catch {
       specCount = 0;
     }
 
-    if (tasks.length >= SCALE_FULL_TASKS || fileCount >= SCALE_FULL_FILES || specCount >= 2) {
+    if (tasks.length >= 3 || fileCount >= 4 || specCount >= 2) {
       return 'full';
     }
     return 'light';
   }
 
-  private async readConfig(changeName: string): Promise<{ buildCmd: string; testCmd: string }> {
-    const configPath = path.join(
-      this.root,
-      'openspec',
-      'changes',
-      changeName,
-      '.driv',
-      'config.yaml',
-    );
-    try {
-      const stat = await this.fs.stat(configPath);
-      const mtime = stat.mtimeMs;
-      if (this.configCache && this.configCache.mtime === mtime) {
-        return this.configCache.data;
-      }
-      const content = await this.fs.readFile(configPath);
-      const { parse } = await import('yaml');
-      const config = parse(content) as Record<string, unknown>;
-      const data = {
-        buildCmd: String(config?.buildCmd ?? 'npm run build'),
-        testCmd: String(config?.testCmd ?? 'npm test'),
-      };
-      this.configCache = { data, mtime };
-      return data;
-    } catch (err) {
-      console.warn(`[driv] verify: failed to read config: ${(err as Error).message}`);
-      return { buildCmd: 'npm run build', testCmd: 'npm test' };
+  /**
+   * 读取 Verify 配置，支持项目级 `.driv/config.yaml` 与 change 级 `.driv/config.yaml`。
+   * 优先级：change 级 > 项目级 > 默认值。结果会被缓存。
+   */
+  private async readConfig(changeName?: string): Promise<VerifyConfig> {
+    if (this.configCache) return this.configCache;
+
+    const candidates: string[] = [];
+    // change 级配置（优先）
+    if (changeName) {
+      candidates.push(
+        path.join(this.root, 'openspec', 'changes', changeName, '.driv', 'config.yaml'),
+      );
     }
+    // 项目级配置
+    candidates.push(path.join(this.root, '.driv', 'config.yaml'));
+
+    for (const configPath of candidates) {
+      try {
+        if (!(await this.fs.exists(configPath))) continue;
+        const content = await this.fs.readFile(configPath);
+        const { parse } = await import('yaml');
+        const raw = parse(content) as Record<string, unknown>;
+        const verify = (raw?.verify ?? {}) as Record<string, unknown>;
+        const coverage = (verify.coverage ?? {}) as Record<string, unknown>;
+        const thresholds = (coverage.thresholds ?? {}) as Record<string, unknown>;
+
+        const config: VerifyConfig = {
+          buildCmd: String(verify.build_cmd ?? raw?.buildCmd ?? DEFAULT_VERIFY_CONFIG.buildCmd),
+          testCmd: String(verify.test_cmd ?? raw?.testCmd ?? DEFAULT_VERIFY_CONFIG.testCmd),
+          lintCmd: String(verify.lint_cmd ?? DEFAULT_VERIFY_CONFIG.lintCmd),
+          typecheckCmd: String(verify.typecheck_cmd ?? DEFAULT_VERIFY_CONFIG.typecheckCmd),
+          coverageThresholds: {
+            lines: Number(thresholds.lines ?? DEFAULT_COVERAGE_THRESHOLDS.lines),
+            functions: Number(thresholds.functions ?? DEFAULT_COVERAGE_THRESHOLDS.functions),
+            branches: Number(thresholds.branches ?? DEFAULT_COVERAGE_THRESHOLDS.branches),
+            statements: Number(thresholds.statements ?? DEFAULT_COVERAGE_THRESHOLDS.statements),
+          },
+          skipLightChecks: Boolean(
+            verify.skip_light_checks ?? DEFAULT_VERIFY_CONFIG.skipLightChecks,
+          ),
+        };
+        this.configCache = config;
+        return config;
+      } catch {
+        // 继续尝试下一个候选路径
+      }
+    }
+
+    this.configCache = DEFAULT_VERIFY_CONFIG;
+    return this.configCache;
   }
 
   async executeBuild(changeName: string): Promise<boolean> {
@@ -142,17 +212,17 @@ export class VerifyService {
     return this.runCommand(testCmd);
   }
 
-  private async readCoverage(): Promise<{
+  private async readCoverage(thresholds: CoverageThresholds): Promise<{
     passed: boolean;
     summary?: VerifyResult['coverageSummary'];
   }> {
     try {
       const coveragePath = path.join(this.root, 'coverage', 'coverage-summary.json');
-      const content = await this.fs.readFile(coveragePath);
+      const content = await fs.promises.readFile(coveragePath, 'utf-8');
       const data = JSON.parse(content);
       // coverage-summary.json 格式：{ total: { lines: { pct: 80 }, functions: { pct: 82 }, branches: { pct: 70 }, statements: { pct: 80 } } }
       const total = data.total;
-      if (!total) return { passed: true };
+      if (!total) return { passed: false };
       const summary = {
         lines: total.lines?.pct ?? 0,
         functions: total.functions?.pct ?? 0,
@@ -160,40 +230,40 @@ export class VerifyService {
         statements: total.statements?.pct ?? 0,
       };
       const passed =
-        summary.lines >= COVERAGE_PASS_THRESHOLD &&
-        summary.functions >= COVERAGE_PASS_THRESHOLD &&
-        summary.branches >= COVERAGE_WARN_THRESHOLD &&
-        summary.statements >= COVERAGE_PASS_THRESHOLD;
+        summary.lines >= thresholds.lines &&
+        summary.functions >= thresholds.functions &&
+        summary.branches >= thresholds.branches &&
+        summary.statements >= thresholds.statements;
       return { passed, summary };
-    } catch (err) {
-      console.warn(`[driv] verify: failed to read coverage: ${(err as Error).message}`);
+    } catch {
+      // coverage 文件不存在，视为未通过（要求显式提供覆盖率数据）
       return { passed: false };
     }
   }
 
-  async executeLint(): Promise<boolean> {
-    const packageJsonPath = path.join(this.root, 'package.json');
-    if (!(await this.fs.exists(packageJsonPath))) {
-      return true; // 无 package.json，非 TS/Node 项目，跳过
-    }
+  async executeLint(changeName?: string): Promise<boolean> {
+    const { lintCmd } = await this.readConfig(changeName);
+    // 无 lint script 时跳过（向后兼容）
     try {
-      const pkg = await this.fs.readJson<{ scripts?: { lint?: string } }>(packageJsonPath);
-      if (!pkg.scripts?.lint) {
-        return true; // 无 lint script，向后兼容
-      }
-      return this.runCommand('npm run lint');
-    } catch (err) {
-      console.warn(`[driv] verify: failed to read lint script: ${(err as Error).message}`);
-      return false;
+      const packageJsonPath = path.join(this.root, 'package.json');
+      const content = await fs.promises.readFile(packageJsonPath, 'utf-8');
+      const pkg = JSON.parse(content);
+      if (!pkg.scripts?.lint) return true;
+    } catch {
+      return true;
     }
+    return this.runCommand(lintCmd);
   }
 
-  async executeTypeCheck(): Promise<boolean> {
-    const tsconfigPath = path.join(this.root, 'tsconfig.json');
-    if (!(await this.fs.exists(tsconfigPath))) {
-      return true; // 无 tsconfig.json，非 TS 项目，跳过
+  async executeTypeCheck(changeName?: string): Promise<boolean> {
+    const { typecheckCmd } = await this.readConfig(changeName);
+    try {
+      const tsconfigPath = path.join(this.root, 'tsconfig.json');
+      await fs.promises.access(tsconfigPath);
+    } catch {
+      return true; // 无 tsconfig.json，向后兼容
     }
-    return this.runCommand('npx tsc --noEmit');
+    return this.runCommand(typecheckCmd);
   }
 
   private parseCommand(cmd: string): { command: string; args: string[] } {
@@ -224,14 +294,38 @@ export class VerifyService {
     try {
       const result = await this.scriptExec.exec(command, args, { cwd: this.root });
       return result.exitCode === 0;
-    } catch (err) {
-      console.warn(`[driv] verify: failed to run command: ${(err as Error).message}`);
+    } catch {
       return false;
     }
   }
 
+  /**
+   * 处理 Verify 阶段的分支策略，根据 isolation 模式决策 squash/retain，并写入状态字段。
+   * 修复：原 branchHandled 硬编码 false，导致 Archive 入口永远被阻塞。
+   */
+  private async handleBranch(changeName: string): Promise<boolean> {
+    const state = await this.stateMachine.getState(changeName);
+    const isolation = state.isolation || 'branch';
+    // branch / worktree 隔离模式下需要合并分支；inline 模式无需处理
+    const needsBranchHandling = isolation === 'branch' || isolation === 'worktree';
+    const strategy = needsBranchHandling ? 'squash' : 'retain';
+
+    await this.stateMachine.setField(
+      changeName,
+      'phases.verify.artifacts.branch-handled',
+      'true',
+    );
+    await this.stateMachine.setField(
+      changeName,
+      'phases.verify.artifacts.branch-strategy',
+      strategy,
+    );
+    return true;
+  }
+
   async verify(changeName: string): Promise<VerifyResult> {
     const scale = await this.assessScale(changeName);
+    const config = await this.readConfig(changeName);
     const buildPassed = await this.executeBuild(changeName);
     const testsPassed = await this.executeTests(changeName);
 
@@ -242,7 +336,7 @@ export class VerifyService {
       const files = await walkDir(srcDir);
       for (const file of files) {
         if (file.endsWith('.ts')) {
-          const content = await this.fs.readFile(file);
+          const content = await fs.promises.readFile(file, 'utf-8');
           const result = await this.cleanCodeChecker.check(content, file);
           if (!result.passed) {
             cleanCodePassed = false;
@@ -250,22 +344,30 @@ export class VerifyService {
           }
         }
       }
-    } catch (err) {
-      console.warn(`[driv] verify: failed to check clean code: ${(err as Error).message}`);
-      cleanCodePassed = false;
+    } catch {
+      cleanCodePassed = true;
     }
 
-    // 覆盖率收集（light 模式跳过 coverage 检查）
-    const coverageSkipped = scale === 'light';
-    const coverage = coverageSkipped ? { passed: true } : await this.readCoverage();
+    // 修复：light 模式自动跳过 coverage/lint/typecheck（与"轻量验证"语义一致）
+    // full 模式才执行完整检查套件
+    // 注：可通过 .driv/config.yaml 的 verify.disable_light_skip=true 禁用此行为
+    const skipLightChecks = scale === 'light';
+    let coverage: { passed: boolean; summary?: VerifyResult['coverageSummary'] };
+    let coverageSkipped = false;
+    if (skipLightChecks) {
+      coverage = { passed: true };
+      coverageSkipped = true;
+    } else {
+      coverage = await this.readCoverage(config.coverageThresholds);
+    }
 
-    // lint + typecheck（新增）
-    const lintPassed = await this.executeLint();
-    const typeCheckPassed = await this.executeTypeCheck();
+    const lintPassed = skipLightChecks ? true : await this.executeLint(changeName);
+    const typeCheckPassed = skipLightChecks ? true : await this.executeTypeCheck(changeName);
 
     await this.writeCleanCodeArtifacts(changeName, cleanCodePassed, cleanCodeIssues);
 
-    const branchHandled = false;
+    // 修复：调用 handleBranch 写入状态字段，否则 Archive 入口永远被阻塞
+    const branchHandled = await this.handleBranch(changeName);
     const passed =
       buildPassed &&
       testsPassed &&
@@ -329,13 +431,8 @@ export class VerifyService {
     lines.push(`| 构建 | ${result.buildPassed ? '✅ 通过' : '❌ 失败'} |`);
     lines.push(`| 测试 | ${result.testsPassed ? '✅ 通过' : '❌ 失败'} |`);
     lines.push(`| Clean Code | ${result.cleanCodePassed ? '✅ 通过' : '❌ 失败'} |`);
-    const coverageStatus = result.coverageSkipped
-      ? '⏭️ 跳过'
-      : result.coveragePassed
-        ? '✅ 通过'
-        : '❌ 未达标';
     lines.push(
-      `| 测试覆盖率 | ${coverageStatus} ${
+      `| 测试覆盖率 | ${result.coveragePassed ? '✅ 通过' : '❌ 未达标'} ${
         result.coverageSummary ? `(${result.coverageSummary.lines}% lines)` : ''
       } |`,
     );

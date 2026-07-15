@@ -5,13 +5,6 @@ import { PathResolver } from './path-resolver.js';
 import { YamlParser } from '../utils/yaml-parser.js';
 import { Phase } from './types.js';
 
-const COMPRESSION_BETA_SUMMARY = 400;
-const COMPRESSION_BETA_ITEMS = 10;
-const COMPRESSION_FULL_SUMMARY = 200;
-const COMPRESSION_FULL_ITEMS = 5;
-const COMPRESSION_OFF_SUMMARY = 500;
-const COMPRESSION_OFF_ITEMS = 100;
-
 export interface SourceFile {
   path: string;
   hash: string;
@@ -66,29 +59,23 @@ export class ContextCompression {
         return { ...context };
       case 'beta':
         return {
-          summary:
-            context.summary.length > COMPRESSION_BETA_SUMMARY
-              ? context.summary.slice(0, COMPRESSION_BETA_SUMMARY)
-              : context.summary,
-          decisions: context.decisions.slice(0, COMPRESSION_BETA_ITEMS),
-          constraints: context.constraints.slice(0, COMPRESSION_BETA_ITEMS),
-          tasks: context.tasks.slice(0, COMPRESSION_BETA_ITEMS),
-          reviews: context.reviews.slice(0, COMPRESSION_BETA_ITEMS),
+          summary: context.summary.length > 400 ? context.summary.slice(0, 400) : context.summary,
+          decisions: context.decisions.slice(0, 10),
+          constraints: context.constraints.slice(0, 10),
+          tasks: context.tasks.slice(0, 10),
+          reviews: context.reviews.slice(0, 10),
           intent: context.intent.length > 200 ? context.intent.slice(0, 200) : context.intent,
-          acceptanceCriteria: context.acceptanceCriteria.slice(0, COMPRESSION_BETA_ITEMS),
+          acceptanceCriteria: context.acceptanceCriteria.slice(0, 10),
         };
       case 'full':
         return {
-          summary:
-            context.summary.length > COMPRESSION_FULL_SUMMARY
-              ? context.summary.slice(0, COMPRESSION_FULL_SUMMARY)
-              : context.summary,
-          decisions: context.decisions.slice(0, COMPRESSION_FULL_ITEMS),
-          constraints: context.constraints.slice(0, COMPRESSION_FULL_ITEMS),
-          tasks: context.tasks.slice(0, COMPRESSION_FULL_ITEMS),
-          reviews: context.reviews.slice(0, COMPRESSION_FULL_ITEMS),
+          summary: context.summary.length > 200 ? context.summary.slice(0, 200) : context.summary,
+          decisions: context.decisions.slice(0, 5),
+          constraints: context.constraints.slice(0, 5),
+          tasks: context.tasks.slice(0, 5),
+          reviews: context.reviews.slice(0, 5),
           intent: context.intent.length > 100 ? context.intent.slice(0, 100) : context.intent,
-          acceptanceCriteria: context.acceptanceCriteria.slice(0, COMPRESSION_FULL_ITEMS),
+          acceptanceCriteria: context.acceptanceCriteria.slice(0, 5),
         };
     }
   }
@@ -106,50 +93,32 @@ export class HandoffManager {
     const sources: SourceFile[] = [];
 
     const coreFiles = ['proposal.md', 'design.md', 'tasks.md'];
-    const coreResults = await Promise.all(
-      coreFiles.map(async (file) => {
-        const filePath = path.join(changeDir, file);
-        if (await this.fs.exists(filePath)) {
-          return this.hashAndSummarize(filePath);
-        }
-        return null;
-      }),
-    );
-    for (const result of coreResults) {
-      if (result) sources.push(result);
+    for (const file of coreFiles) {
+      const filePath = path.join(changeDir, file);
+      if (await this.fs.exists(filePath)) {
+        sources.push(await this.hashAndSummarize(filePath));
+      }
     }
 
     const specsDir = path.join(changeDir, 'specs');
     if (await this.fs.exists(specsDir)) {
       const specEntries = await this.fs.listDir(specsDir);
-      const specResults = await Promise.all(
-        specEntries.map(async (entry) => {
-          const specFile = path.join(specsDir, entry, 'spec.md');
-          if (await this.fs.exists(specFile)) {
-            return this.hashAndSummarize(specFile);
-          }
-          return null;
-        }),
-      );
-      for (const result of specResults) {
-        if (result) sources.push(result);
+      for (const entry of specEntries) {
+        const specFile = path.join(specsDir, entry, 'spec.md');
+        if (await this.fs.exists(specFile)) {
+          sources.push(await this.hashAndSummarize(specFile));
+        }
       }
     }
 
     const reviewsDir = path.join(changeDir, 'reviews');
     if (await this.fs.exists(reviewsDir)) {
       const reviewFiles = await this.fs.listDir(reviewsDir);
-      const reviewResults = await Promise.all(
-        reviewFiles.map(async (file) => {
-          if (file.endsWith('.md')) {
-            const reviewPath = path.join(reviewsDir, file);
-            return this.hashAndSummarize(reviewPath);
-          }
-          return null;
-        }),
-      );
-      for (const result of reviewResults) {
-        if (result) sources.push(result);
+      for (const file of reviewFiles) {
+        if (file.endsWith('.md')) {
+          const reviewPath = path.join(reviewsDir, file);
+          sources.push(await this.hashAndSummarize(reviewPath));
+        }
       }
     }
 
@@ -197,8 +166,7 @@ export class HandoffManager {
     let handoff: HandoffPackage;
     try {
       handoff = await this.fs.readJson<HandoffPackage>(handoffPath);
-    } catch (err) {
-      console.warn(`[driv] handoff: failed to read handoff for validate: ${(err as Error).message}`);
+    } catch {
       return false;
     }
 
@@ -209,8 +177,7 @@ export class HandoffManager {
         if (expectedHash !== source.hash) {
           return false;
         }
-      } catch (err) {
-        console.warn(`[driv] handoff: failed to read source for validate: ${(err as Error).message}`);
+      } catch {
         return false;
       }
     }
@@ -237,8 +204,7 @@ export class HandoffManager {
     let handoff: HandoffPackage;
     try {
       handoff = await this.fs.readJson<HandoffPackage>(handoffPath);
-    } catch (err) {
-      console.warn(`[driv] handoff: failed to read handoff for mismatch check: ${(err as Error).message}`);
+    } catch {
       return [];
     }
 
@@ -250,8 +216,7 @@ export class HandoffManager {
         if (expectedHash !== source.hash) {
           mismatched.push(source.path);
         }
-      } catch (err) {
-        console.warn(`[driv] handoff: failed to read source for mismatch check: ${(err as Error).message}`);
+      } catch {
         mismatched.push(source.path);
       }
     }
@@ -269,8 +234,7 @@ export class HandoffManager {
 
     try {
       return await this.fs.readJson<HandoffPackage>(handoffPath);
-    } catch (err) {
-      console.warn(`[driv] handoff: failed to read handoff package: ${(err as Error).message}`);
+    } catch {
       return null;
     }
   }
@@ -282,8 +246,7 @@ export class HandoffManager {
     }
     try {
       return await this.fs.readFile(filePath);
-    } catch (err) {
-      console.warn(`[driv] handoff: failed to read change file: ${(err as Error).message}`);
+    } catch {
       return null;
     }
   }
@@ -301,40 +264,34 @@ export class HandoffManager {
 
   private async buildContext(changeName: string): Promise<CompressedContext> {
     const changeDir = this.resolver.changeDir(changeName);
-    const proposalPath = path.join(changeDir, 'proposal.md');
-    const designPath = path.join(changeDir, 'design.md');
-    const tasksPath = path.join(changeDir, 'tasks.md');
-    const reviewsDir = path.join(changeDir, 'reviews');
-
-    const [proposalContent, designContent, tasksContent, reviewFiles] = await Promise.all([
-      this.fs.exists(proposalPath).then((exists) => (exists ? this.fs.readFile(proposalPath) : null)),
-      this.fs.exists(designPath).then((exists) => (exists ? this.fs.readFile(designPath) : null)),
-      this.fs.exists(tasksPath).then((exists) => (exists ? this.fs.readFile(tasksPath) : null)),
-      this.fs.exists(reviewsDir).then((exists) => (exists ? this.fs.listDir(reviewsDir) : [])),
-    ]);
-
     let summaryText = '';
     let intent = '';
-    if (proposalContent) {
-      summaryText = proposalContent.slice(0, COMPRESSION_OFF_SUMMARY);
+
+    const proposalPath = path.join(changeDir, 'proposal.md');
+    if (await this.fs.exists(proposalPath)) {
+      const proposalContent = await this.fs.readFile(proposalPath);
+      summaryText = proposalContent.slice(0, 500);
       intent = this.extractIntent(proposalContent);
     }
 
     const decisions: string[] = [];
     const constraints: string[] = [];
-    if (designContent) {
-      let currentSection = '';
+
+    const designPath = path.join(changeDir, 'design.md');
+    if (await this.fs.exists(designPath)) {
+      const designContent = await this.fs.readFile(designPath);
+      let currentSection: string | null = null;
       for (const line of designContent.split('\n')) {
         const sectionMatch = line.match(/^##\s+(.+)/);
         if (sectionMatch) {
-          currentSection = sectionMatch[1].toLowerCase();
+          currentSection = this.matchSection(sectionMatch[1]);
           continue;
         }
         const trimmed = line.replace(/^[-*\s]+/, '').trim();
         if (!trimmed) continue;
-        if (currentSection === 'decisions' || currentSection === '决策') {
+        if (currentSection === 'decisions') {
           decisions.push(trimmed);
-        } else if (currentSection === 'constraints' || currentSection === '约束') {
+        } else if (currentSection === 'constraints') {
           constraints.push(trimmed);
         }
       }
@@ -342,7 +299,9 @@ export class HandoffManager {
 
     const tasks: string[] = [];
     const acceptanceCriteria: string[] = [];
-    if (tasksContent) {
+    const tasksPath = path.join(changeDir, 'tasks.md');
+    if (await this.fs.exists(tasksPath)) {
+      const tasksContent = await this.fs.readFile(tasksPath);
       for (const line of tasksContent.split('\n')) {
         const taskMatch = line.match(/-\s+\[.?\]\s+(.+)/);
         if (taskMatch) {
@@ -356,19 +315,16 @@ export class HandoffManager {
     }
 
     const reviews: string[] = [];
-    if (reviewFiles && reviewFiles.length > 0) {
-      const reviewContents = await Promise.all(
-        reviewFiles
-          .filter((file) => file.endsWith('.md'))
-          .map(async (file) => {
-            const reviewPath = path.join(reviewsDir, file);
-            const content = await this.fs.readFile(reviewPath);
-            return { file, content };
-          }),
-      );
-      for (const { file, content } of reviewContents) {
-        const firstLine = content.split('\n')[0]?.replace(/^#\s*/, '').trim() || file;
-        reviews.push(`${firstLine}: ${content.slice(0, 100).replace(/\n/g, ' ').trim()}`);
+    const reviewsDir = path.join(changeDir, 'reviews');
+    if (await this.fs.exists(reviewsDir)) {
+      const reviewFiles = await this.fs.listDir(reviewsDir);
+      for (const file of reviewFiles) {
+        if (file.endsWith('.md')) {
+          const reviewPath = path.join(reviewsDir, file);
+          const content = await this.fs.readFile(reviewPath);
+          const firstLine = content.split('\n')[0]?.replace(/^#\s*/, '').trim() || file;
+          reviews.push(`${firstLine}: ${content.slice(0, 100).replace(/\n/g, ' ').trim()}`);
+        }
       }
     }
 
@@ -409,6 +365,25 @@ export class HandoffManager {
       }
     }
     return paragraphLines.join(' ');
+  }
+
+  /**
+   * 将 design.md 的章节标题规范化为内部键名，支持中英双语。
+   * 修复：原代码 toLowerCase() 对中文标题无效，导致 decisions/constraints 永远为空。
+   */
+  private static readonly SECTION_ALIASES: Record<string, string[]> = {
+    decisions: ['decisions', 'decision', '决策记录', '关键决策', '决策'],
+    constraints: ['constraints', 'constraint', '约束', '限制条件', '限制'],
+  };
+
+  private matchSection(heading: string): string | null {
+    const lower = heading.toLowerCase().trim();
+    // 去掉中文序号前缀，如 "十二、" "12.1" "十二."
+    const stripped = lower.replace(/^(?:[一二三四五六七八九十百]+|[0-9]+)[、.．]\s*/, '');
+    for (const [key, aliases] of Object.entries(HandoffManager.SECTION_ALIASES)) {
+      if (aliases.some((a) => stripped.includes(a))) return key;
+    }
+    return null;
   }
 
   private extractAcceptanceCriteria(tasksContent: string): string[] {

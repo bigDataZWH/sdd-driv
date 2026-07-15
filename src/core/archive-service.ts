@@ -1,8 +1,8 @@
 import { FileSystem } from '../utils/file-system.js';
 import { StateMachine } from './state-machine.js';
 import { YamlParser } from '../utils/yaml-parser.js';
-import { parseDeltaSpec } from './delta-spec-parser.js';
 import * as path from 'path';
+import * as fs from 'fs';
 
 export type SpecMergeStrategy = 'append' | 'update' | 'supersede';
 
@@ -79,15 +79,13 @@ export class ArchiveService {
       await this.fs.ensureDir(archiveDir);
 
       const artifacts = ['proposal.md', 'design.md', 'tasks.md', '.driv.yaml'];
-      await Promise.all(
-        artifacts.map(async (artifact) => {
-          const src = path.join(changeDir, artifact);
-          const dest = path.join(archiveDir, artifact);
-          if (await this.fs.exists(src)) {
-            await this.fs.copyFile(src, dest);
-          }
-        }),
-      );
+      for (const artifact of artifacts) {
+        const src = path.join(changeDir, artifact);
+        const dest = path.join(archiveDir, artifact);
+        if (await this.fs.exists(src)) {
+          await this.fs.copyFile(src, dest);
+        }
+      }
 
       await this.copyDirRecursive(path.join(changeDir, 'specs'), path.join(archiveDir, 'specs'));
 
@@ -130,8 +128,8 @@ export class ArchiveService {
       try {
         await this.rollbackForDir(archiveDir);
         rollbackPerformed = true;
-      } catch (err) {
-        console.warn(`[driv] archive: rollback failed: ${(err as Error).message}`);
+      } catch {
+        // rollback best-effort
       }
       return {
         archived: false,
@@ -160,15 +158,17 @@ export class ArchiveService {
       const deltaContent = await this.fs.readFile(deltaSpecPath);
       const strategy = this.detectStrategy(deltaContent);
       const mainExists = await this.fs.exists(mainSpecPath);
+      const backupPath = mainSpecPath + '.backup';
 
       if (mainExists) {
-        await this.fs.copyFile(mainSpecPath, mainSpecPath + '.backup');
+        await this.fs.copyFile(mainSpecPath, backupPath);
       }
 
+      let mergeSucceeded = false;
       if (strategy === 'supersede') {
         await this.fs.ensureDir(mainSpecDir);
         await this.fs.writeFile(mainSpecPath, deltaContent);
-        merged = true;
+        mergeSucceeded = true;
       } else if (strategy === 'update' && mainExists) {
         const mainContent = await this.fs.readFile(mainSpecPath);
         const updated = this.applyUpdate(mainContent, deltaContent);
@@ -177,7 +177,7 @@ export class ArchiveService {
           await this.fs.writeFile(conflictPath, deltaContent);
         } else {
           await this.fs.writeFile(mainSpecPath, updated);
-          merged = true;
+          mergeSucceeded = true;
         }
       } else {
         if (mainExists) {
@@ -189,8 +189,18 @@ export class ArchiveService {
           await this.fs.ensureDir(mainSpecDir);
           await this.fs.writeFile(mainSpecPath, deltaContent);
         }
-        merged = true;
+        mergeSucceeded = true;
       }
+
+      // 修复：合并成功后清理 .backup 文件，避免污染 specs 目录
+      if (mergeSucceeded && (await this.fs.exists(backupPath))) {
+        try {
+          await fs.promises.unlink(backupPath);
+        } catch {
+          // 清理失败不阻塞流程
+        }
+      }
+      if (mergeSucceeded) merged = true;
     }
 
     return merged;
@@ -245,36 +255,24 @@ export class ArchiveService {
 
     for (const dir of matchingDirs) {
       const fullPath = path.join(archiveDir, dir);
-      await this.fs.rm(fullPath, { recursive: true, force: true });
+      await fs.promises.rm(fullPath, { recursive: true, force: true });
     }
 
-    // 恢复 spec backup（mergeDeltaSpec 改写主 spec 时留下的 .backup）
-    await this.restoreSpecBackups(changeName);
-  }
-
-  private async restoreSpecBackups(changeName: string): Promise<void> {
+    // 修复：还原被 mergeDeltaSpec 覆盖的主 spec 文件
+    // 原 rollback 只删除 archive 目录，不还原主 spec，导致 supersede 后主 spec 永久丢失
     const specsDir = path.join(this.root, 'openspec', 'specs');
-    if (!(await this.fs.exists(specsDir))) return;
-
-    let entries: string[] = [];
-    try {
-      entries = await this.fs.listDir(specsDir);
-    } catch (err) {
-      console.warn(`[driv] archive: failed to list specs for restore: ${(err as Error).message}`);
-      return;
-    }
-
-    for (const entry of entries) {
-      const specPath = path.join(specsDir, entry, 'spec.md');
-      const backupPath = specPath + '.backup';
-
-      if (await this.fs.exists(backupPath)) {
-        try {
-          const backupContent = await this.fs.readFile(backupPath);
-          await this.fs.writeFile(specPath, backupContent);
-          await this.fs.unlink(backupPath);
-        } catch (err) {
-          console.warn(`[driv] archive: failed to restore spec backup: ${(err as Error).message}`);
+    if (await this.fs.exists(specsDir)) {
+      const capabilities = await this.fs.listDir(specsDir);
+      for (const capability of capabilities) {
+        const backupPath = path.join(specsDir, capability, 'spec.md.backup');
+        const mainPath = path.join(specsDir, capability, 'spec.md');
+        if (await this.fs.exists(backupPath)) {
+          try {
+            await this.fs.copyFile(backupPath, mainPath);
+            await fs.promises.unlink(backupPath);
+          } catch {
+            // 还原失败不阻塞流程
+          }
         }
       }
     }
@@ -290,7 +288,7 @@ export class ArchiveService {
       const srcPath = path.join(srcDir, entry);
       const destPath = path.join(destDir, entry);
 
-      const stat = await this.fs.stat(srcPath);
+      const stat = await fs.promises.stat(srcPath);
       if (stat.isDirectory()) {
         await this.copyDirRecursive(srcPath, destPath);
       } else {
@@ -301,7 +299,7 @@ export class ArchiveService {
 
   private async rollbackForDir(archiveDir: string): Promise<void> {
     if (await this.fs.exists(archiveDir)) {
-      await this.fs.rm(archiveDir, { recursive: true, force: true });
+      await fs.promises.rm(archiveDir, { recursive: true, force: true });
     }
   }
 
@@ -334,20 +332,13 @@ export class ArchiveService {
   }
 
   private detectStrategy(content: string): SpecMergeStrategy {
-    // 优先用 DeltaSpecParser 解析
-    const delta = parseDeltaSpec(content);
-
-    if (delta.removed.length > 0) return 'supersede';
-    if (delta.modified.length > 0) return 'update';
-    if (delta.added.length > 0) return 'append';
-
-    // 回退到旧的正则检测
     if (content.match(/<!--\s*driv-merge\s*:\s*supersede\s*-->/)) return 'supersede';
     if (content.match(/<!--\s*driv-merge\s*:\s*update\s*-->/)) return 'update';
     if (content.match(/<!--\s*driv-merge\s*:\s*append\s*-->/)) return 'append';
-
+    // 3. 章节标记
     if (content.includes('## SUPERSEDE')) return 'supersede';
     if (content.includes('## UPDATED Requirements')) return 'update';
+    if (content.includes('## MODIFIED Requirements')) return 'update';
 
     return 'append';
   }
@@ -362,8 +353,7 @@ export class ArchiveService {
     for (const [name, deltaReq] of deltaReqs) {
       if (mainReqs.has(name)) {
         const existingReq = mainReqs.get(name)!;
-        // 使用 split/join 全局替换，避免 string.replace 只替换第一个匹配
-        updated = updated.split(existingReq).join(deltaReq);
+        updated = updated.replace(existingReq, deltaReq);
       } else {
         updated = updated.trimEnd() + '\n\n' + deltaReq;
       }

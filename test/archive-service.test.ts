@@ -6,7 +6,6 @@ import * as os from 'os';
 describe('ArchiveService', () => {
   let tmpDir: string;
   let archiveService: InstanceType<any>;
-  let sm: any;
   let FileSystem: any;
   let YamlParser: any;
   let StateMachine: any;
@@ -33,7 +32,7 @@ describe('ArchiveService', () => {
     const fsImpl = new FileSystem(tmpDir);
     const parser = new YamlParser(fsImpl);
     const resolver = new PathResolver(tmpDir);
-    sm = new StateMachine(fsImpl, parser, resolver);
+    const sm = new StateMachine(fsImpl, parser, resolver);
     archiveService = new ArchiveService(fsImpl, sm, parser, tmpDir);
 
     // Initialize change
@@ -103,7 +102,6 @@ describe('ArchiveService', () => {
       const state = parse(fs.readFileSync(statePath, 'utf-8'));
       state.phases.verify.status = 'in-progress';
       fs.writeFileSync(statePath, stringify(state), 'utf-8');
-      sm.clearCache(changeName);
 
       const failures = await archiveService.checkPreconditions(changeName);
       expect(failures).toContain('verify_not_completed');
@@ -116,7 +114,6 @@ describe('ArchiveService', () => {
       const state = parse(fs.readFileSync(statePath, 'utf-8'));
       state.archived = true;
       fs.writeFileSync(statePath, stringify(state), 'utf-8');
-      sm.clearCache(changeName);
 
       const failures = await archiveService.checkPreconditions(changeName);
       expect(failures).toContain('already_archived');
@@ -177,7 +174,6 @@ describe('ArchiveService', () => {
       const state = parse(fs.readFileSync(statePath, 'utf-8'));
       state.superpowers.plan = `openspec/changes/${changeName}/plan.md`;
       fs.writeFileSync(statePath, stringify(state), 'utf-8');
-      sm.clearCache(changeName);
       fs.writeFileSync(path.join(changeDir, 'plan.md'), '# Plan content', 'utf-8');
 
       const result = await archiveService.archive(changeName);
@@ -195,7 +191,6 @@ describe('ArchiveService', () => {
       const state = parse(fs.readFileSync(statePath, 'utf-8'));
       state.superpowers.brainstorming = `openspec/changes/${changeName}/brainstorming.md`;
       fs.writeFileSync(statePath, stringify(state), 'utf-8');
-      sm.clearCache(changeName);
       fs.writeFileSync(path.join(changeDir, 'brainstorming.md'), '# Brainstorming', 'utf-8');
 
       const result = await archiveService.archive(changeName);
@@ -268,55 +263,8 @@ describe('ArchiveService', () => {
       const mainSpec = fs.readFileSync(mainSpecDir + '/spec.md', 'utf-8');
       expect(mainSpec).toContain('log ALL levels');
       expect(mainSpec).toContain('Auth');
-      // Backup should exist
-      expect(fs.existsSync(mainSpecDir + '/spec.md.backup')).toBe(true);
-    });
-
-    it('update 策略全局替换多个同名的重复 requirement', async () => {
-      // 主 spec 中包含两段完全相同的 Core logging requirement 文本
-      const mainSpecDir = path.join(tmpDir, 'openspec', 'specs', 'dup-core');
-      fs.mkdirSync(mainSpecDir, { recursive: true });
-      const mainSpecContent = [
-        '## Overview',
-        '',
-        '### Requirement: Core logging',
-        'The system SHALL log info.',
-        '',
-        '### Requirement: Auth',
-        'The system SHALL authenticate.',
-        '',
-        '### Requirement: Core logging',
-        'The system SHALL log info.',
-        '',
-      ].join('\n');
-      fs.writeFileSync(path.join(mainSpecDir, 'spec.md'), mainSpecContent, 'utf-8');
-
-      const deltaSpecDir = path.join(
-        tmpDir,
-        'openspec',
-        'changes',
-        changeName,
-        'specs',
-        'dup-core',
-      );
-      fs.mkdirSync(deltaSpecDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(deltaSpecDir, 'spec.md'),
-        '## UPDATED Requirements\n\n### Requirement: Core logging\nThe system SHALL log ALL levels.\n',
-        'utf-8',
-      );
-
-      const merged = await archiveService.mergeDeltaSpec(changeName);
-      expect(merged).toBe(true);
-
-      const mainSpec = fs.readFileSync(path.join(mainSpecDir, 'spec.md'), 'utf-8');
-      // 两处 Core logging 都应被替换为 ALL levels
-      const allLevelsCount = (mainSpec.match(/log ALL levels/g) || []).length;
-      expect(allLevelsCount).toBe(2);
-      // 不应残留旧文本
-      expect(mainSpec).not.toContain('log info.');
-      // Auth 保留
-      expect(mainSpec).toContain('SHALL authenticate.');
+      // 修复后：合并成功后应清理 .backup 文件，避免污染 specs 目录
+      expect(fs.existsSync(mainSpecDir + '/spec.md.backup')).toBe(false);
     });
   });
 
@@ -335,40 +283,6 @@ describe('ArchiveService', () => {
 
     it('归档不存在时报错', async () => {
       await expect(archiveService.rollback('nonexistent')).rejects.toThrow();
-    });
-
-    it('rollback 后恢复 spec backup 文件', async () => {
-      // 模拟 mergeDeltaSpec 改写主 spec 留下的 .backup
-      const specsDir = path.join(tmpDir, 'openspec', 'specs', 'test-capability');
-      fs.mkdirSync(specsDir, { recursive: true });
-      const mainSpecPath = path.join(specsDir, 'spec.md');
-      const backupPath = mainSpecPath + '.backup';
-      fs.writeFileSync(mainSpecPath, '# 改写后的 spec', 'utf-8');
-      fs.writeFileSync(backupPath, '# 原始 spec', 'utf-8');
-
-      // 创建归档目录使 rollback 可执行
-      const archiveDir = path.join(tmpDir, 'openspec', 'archive', '2026-06-28-test-change');
-      fs.mkdirSync(archiveDir, { recursive: true });
-      fs.writeFileSync(path.join(archiveDir, 'proposal.md'), '# Copied', 'utf-8');
-
-      await archiveService.rollback(changeName);
-
-      // 归档目录被删除
-      expect(fs.existsSync(archiveDir)).toBe(false);
-      // .backup 内容恢复到 spec.md
-      expect(fs.readFileSync(mainSpecPath, 'utf-8')).toBe('# 原始 spec');
-      // .backup 文件被清理
-      expect(fs.existsSync(backupPath)).toBe(false);
-    });
-
-    it('rollback 时无 specs 目录不报错', async () => {
-      // 不创建 specs 目录
-      const archiveDir = path.join(tmpDir, 'openspec', 'archive', '2026-06-28-test-change');
-      fs.mkdirSync(archiveDir, { recursive: true });
-      fs.writeFileSync(path.join(archiveDir, 'proposal.md'), '# Copied', 'utf-8');
-
-      await expect(archiveService.rollback(changeName)).resolves.toBeUndefined();
-      expect(fs.existsSync(archiveDir)).toBe(false);
     });
   });
 

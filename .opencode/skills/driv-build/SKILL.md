@@ -34,10 +34,12 @@ description: 实现阶段 - 使用 TDD 模式落地代码实现
 - 等待用户确认（confirmed）后再进入下一步
 - 用户拒绝时返回当前步骤修改，不进入下一阶段
 
-5. **输出源码文件** — 根据设计文档生成源码：
-   - `index.html` — HTML 结构
-   - `styles.css` — 样式文件
-   - `app.js` — 应用逻辑
+5. **输出源码文件** — 根据 design.md 的技术栈决策生成源码：
+   - 由 design.md 中的 `{{tech_stack}}` 推导产物路径，不预定义固定文件名
+   - 前端项目：按框架约定（React→`src/App.tsx`，Vue→`src/App.vue`，原生→`index.html`/`styles.css`/`app.js`）
+   - 后端项目：按语言约定（Node→`src/index.ts`，Python→`src/main.py`，Go→`cmd/main.go`）
+   - CLI 工具：`bin/cli.js` + `src/`
+   - 库：`src/index.ts` + `package.json` exports
 6. **更新 .driv.yaml** — 设置 build 阶段状态为 completed
 7. **更新 tasks.md** — 勾选 B1-B7 构建阶段任务
 8. **输出结果** — 显示生成的文件清单和下一步 `/driv-verify`
@@ -46,9 +48,7 @@ description: 实现阶段 - 使用 TDD 模式落地代码实现
 
 - **生成文件**:
   - `openspec/changes/<name>/plan.md` — 实现计划（BuildOrchestrator 存根 + writing-plans 技能扩充）
-  - `index.html` — HTML 结构
-  - `styles.css` — 样式文件
-  - `app.js` — 应用逻辑
+  - 源码文件 — 路径由 design.md 的技术栈决策驱动，不固定为 web 三件套
 - **修改文件**:
   - `.driv.yaml` — build.status=completed
   - `tasks.md` — B1-B7 勾选
