@@ -81,7 +81,8 @@ describe('initCommand', () => {
     expect(config).toContain('proposals/default.md');
     expect(design).toContain('template: design-default');
     expect(design).toContain('## 一、方案概述');
-    expect(design).toContain('## 十三、附录');
+    expect(design).toContain('## 二、需求追溯');
+    expect(design).toContain('## 十四、附录');
     expect(spec).toContain('template: spec-default');
     expect(spec).toContain('## 一、规格概述');
     expect(spec).toContain('## 十一、附录');
