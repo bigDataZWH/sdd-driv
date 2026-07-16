@@ -10,6 +10,13 @@ import { PLATFORMS, getPlatformSkillsDir, type Platform } from '../core/platform
 import { detectPlatforms, hasSkills, getBaseDir } from '../core/detect.js';
 import { installSuperpowersForPlatforms } from '../core/superpowers.js';
 import { installOpenSpec, getNpmExecutable, execFileSafe } from '../core/openspec.js';
+import {
+  resolveBundle,
+  installOpenSpecOffline,
+  installSuperpowersOffline,
+  installCodegraphOffline,
+  type ResolvedBundle,
+} from '../core/offline.js';
 import type { InstallScope } from '../core/types.js';
 
 export interface InitResult {
@@ -33,6 +40,10 @@ export interface InitOptions {
   skipExisting?: boolean;
   overwrite?: boolean;
   json?: boolean;
+  /** 离线模式：跳过所有联网操作，使用离线兜底 */
+  offline?: boolean;
+  /** 离线包目录路径，配合 --offline 使用 */
+  bundle?: string;
 }
 
 const DRIV_BANNER = [
@@ -295,6 +306,15 @@ async function installOpenSpecIfNeeded(
     return 'skipped';
   }
 
+  // 离线模式：写最小化 openspec/config.yaml，不调用 npx
+  if (options.offline) {
+    const status = await installOpenSpecOffline(targetPath);
+    if (status === 'installed') {
+      log('  OpenSpec: installed (offline, minimal config) -> openspec/');
+    }
+    return status;
+  }
+
   if (!options.json && isInteractive(options)) {
     const shouldInstallOpenSpec = await select({
       message: 'Install OpenSpec for specification-driven development?',
@@ -333,7 +353,24 @@ async function installSuperpowersIfNeeded(
   selectedPlatformIds: string[],
   options: InitOptions,
   log: (msg: string) => void,
+  bundle: ResolvedBundle | null,
 ): Promise<InstallStatus> {
+  // 离线模式：从 bundle 复制 superpowers skills
+  if (options.offline) {
+    if (!bundle || !bundle.superpowersDir) {
+      log('  Superpowers: skipped (offline, no bundle superpowers content)');
+      return 'skipped';
+    }
+    const baseDir = getBaseDir(scope, targetPath);
+    const result = await installSuperpowersOffline(baseDir, scope, selectedPlatformIds, bundle);
+    if (result.status === 'installed') {
+      log(`  Superpowers: installed (offline) -> ${result.copied} skill files copied`);
+    } else {
+      log('  Superpowers: skipped (offline, no skills found in bundle)');
+    }
+    return result.status;
+  }
+
   if (options.json || !isInteractive(options) || selectedPlatformIds.length === 0) {
     return 'skipped';
   }
@@ -365,7 +402,27 @@ async function installCodegraphIfNeeded(
   results: PlatformResult[],
   options: InitOptions,
   log: (msg: string) => void,
+  bundle: ResolvedBundle | null,
 ): Promise<InstallStatus> {
+  // 离线模式：从 bundle 的本地 tarball 安装
+  if (options.offline) {
+    if (!bundle || !bundle.codegraphTarball) {
+      log('  CodeGraph: skipped (offline, no bundle codegraph tarball)');
+      return 'skipped';
+    }
+    log('\n  Installing CodeGraph (offline)...');
+    const codegraphStatus = await installCodegraphOffline(scope, targetPath, bundle);
+    if (codegraphStatus === 'installed') {
+      log('  CodeGraph: installed (offline)');
+    } else if (codegraphStatus === 'failed') {
+      log('  CodeGraph: install failed (offline)');
+    }
+    for (const r of results) {
+      r.codegraph = codegraphStatus;
+    }
+    return codegraphStatus;
+  }
+
   if (options.json || !isInteractive(options)) return 'skipped';
 
   const shouldInstallCodegraph =
@@ -442,6 +499,19 @@ export async function initCommand(
     log(`  Setting up Driv in ${targetPath}\n`);
   }
 
+  // 解析离线包（若提供）
+  let bundle: ResolvedBundle | null = null;
+  if (options.offline && options.bundle) {
+    bundle = await resolveBundle(options.bundle);
+    if (!bundle) {
+      log(`  Warning: bundle directory not found: ${options.bundle}`);
+      log(`  Continuing in offline mode without bundle (online deps will be skipped).\n`);
+    }
+  }
+  if (options.offline && !options.json) {
+    log(`  Mode: offline${bundle ? ` (bundle: ${bundle.bundlePath})` : ' (no bundle)'}\n`);
+  }
+
   const { scope, language, selectedPlatformIds, selectedPlatforms, baseDir } =
     await selectConfiguration(targetPath, options, log);
 
@@ -489,6 +559,7 @@ export async function initCommand(
     selectedPlatformIds,
     options,
     log,
+    bundle,
   );
 
   const codegraphStatus = await installCodegraphIfNeeded(
@@ -497,6 +568,7 @@ export async function initCommand(
     results,
     options,
     log,
+    bundle,
   );
 
   if (options.json) {

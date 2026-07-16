@@ -6,6 +6,7 @@ import { doctorCommand } from '../commands/doctor.js';
 import { updateCommand } from '../commands/update.js';
 import { uninstallCommand } from '../commands/uninstall.js';
 import { reviewCommand } from '../commands/review.js';
+import { bundleCommand } from '../commands/bundle.js';
 
 const require = createRequire(import.meta.url);
 const { version } = require('../../package.json') as { version: string };
@@ -19,7 +20,7 @@ export interface StatusInput {
 }
 
 export function registerCommands(): string[] {
-  return ['init', 'status', 'doctor', 'update', 'uninstall', 'review'];
+  return ['init', 'status', 'doctor', 'update', 'uninstall', 'review', 'bundle'];
 }
 
 export function formatStatusOutput(input: StatusInput): string {
@@ -54,6 +55,8 @@ export function createProgram(): Command {
     .option('--skip-existing', 'Never overwrite existing components')
     .option('--overwrite', 'Overwrite existing files')
     .option('--json', 'Output as JSON')
+    .option('--offline', 'Offline mode: skip all network operations, use offline fallbacks')
+    .option('--bundle <path>', 'Offline bundle directory (use with --offline)')
     .addOption(new Option('--scope <scope>', 'Install scope').choices(['global', 'project']))
     .action(async (targetPath = '.', options) => {
       try {
@@ -63,6 +66,8 @@ export function createProgram(): Command {
           skipExisting: options.skipExisting,
           overwrite: options.overwrite,
           json: options.json,
+          offline: options.offline,
+          bundle: options.bundle,
         });
       } catch (error) {
         if (error instanceof Error && error.name === 'ExitPromptError') {
@@ -71,6 +76,26 @@ export function createProgram(): Command {
         }
         throw error;
       }
+    });
+
+  program
+    .command('bundle [path]')
+    .description('Prepare an offline bundle with driv and its dependencies')
+    .option('--no-network', 'Only bundle driv itself, skip network downloads')
+    .option('--skip-driv', 'Skip bundling driv tarball')
+    .option('--skip-openspec', 'Skip bundling openspec tarball')
+    .option('--skip-codegraph', 'Skip bundling codegraph tarball')
+    .option('--skip-superpowers', 'Skip bundling superpowers skills')
+    .option('--json', 'Output as JSON')
+    .action(async (targetPath = '.', options) => {
+      await bundleCommand(targetPath, {
+        noNetwork: options.noNetwork,
+        skipDriv: options.skipDriv,
+        skipOpenspec: options.skipOpenspec,
+        skipCodegraph: options.skipCodegraph,
+        skipSuperpowers: options.skipSuperpowers,
+        json: options.json,
+      });
     });
 
   program

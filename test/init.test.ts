@@ -197,4 +197,62 @@ describe('initCommand', () => {
     expect(result.scope).toBe('project');
     expect(Array.isArray(result.createdDirs)).toBe(true);
   });
+
+  it('init --offline 离线模式写入最小化 openspec config 且不调用 npx', async () => {
+    const { initCommand } = await import('../src/commands/init.js');
+    const result = await initCommand(tmpDir, ['opencode'], {
+      scope: 'project',
+      offline: true,
+    });
+    // openspec 应使用离线兜底（写最小 config.yaml）
+    expect(result.openspec).toBe('installed');
+    expect(fs.existsSync(path.join(tmpDir, 'openspec', 'config.yaml'))).toBe(true);
+    // superpowers / codegraph 在无 bundle 时应跳过（不联网）
+    expect(result.superpowers).toBe('skipped');
+    expect(result.codegraph).toBe('skipped');
+  });
+
+  it('init --offline --bundle 从 bundle 安装 superpowers skills', async () => {
+    const { initCommand } = await import('../src/commands/init.js');
+    // 准备离线 bundle：superpowers skills 目录
+    const bundleDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'driv-bundle-'));
+    try {
+      const spSkillsDir = path.join(bundleDir, 'superpowers', 'skills');
+      await fs.promises.mkdir(path.join(spSkillsDir, 'brainstorming'), { recursive: true });
+      await fs.promises.writeFile(
+        path.join(spSkillsDir, 'brainstorming', 'SKILL.md'),
+        '---\nname: brainstorming\n---\nbody',
+      );
+
+      const result = await initCommand(tmpDir, ['opencode'], {
+        scope: 'project',
+        offline: true,
+        bundle: bundleDir,
+      });
+      // openspec 离线兜底
+      expect(result.openspec).toBe('installed');
+      // superpowers 从 bundle 复制成功
+      expect(result.superpowers).toBe('installed');
+      expect(
+        fs.existsSync(
+          path.join(tmpDir, '.opencode', 'skills', 'brainstorming', 'SKILL.md'),
+        ),
+      ).toBe(true);
+    } finally {
+      await fs.promises.rm(bundleDir, { recursive: true, force: true });
+    }
+  });
+
+  it('init --offline 不存在的 bundle 目录降级为无 bundle 模式', async () => {
+    const { initCommand } = await import('../src/commands/init.js');
+    const result = await initCommand(tmpDir, ['opencode'], {
+      scope: 'project',
+      offline: true,
+      bundle: path.join(tmpDir, 'nonexistent-bundle'),
+    });
+    // 仍应正常完成（driv skills + 模板离线安装），联网组件跳过
+    expect(result.openspec).toBe('installed');
+    expect(result.superpowers).toBe('skipped');
+    expect(result.codegraph).toBe('skipped');
+  });
 });
