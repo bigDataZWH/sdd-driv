@@ -1,4 +1,5 @@
-const PLACEHOLDER_REGEX = /\{\{([a-z_0-9]+)(:([^}]+))?\}\}/gs;
+// group 1 = name（支持大写、连字符、点号）；group 2 = 含冒号的默认值部分；group 3 = 默认值（不含冒号，允许空）
+const PLACEHOLDER_REGEX = /\{\{([a-zA-Z_][\w.-]*)(:([^}]*))?\}\}/g;
 
 export interface ParsedPlaceholder {
   name: string;

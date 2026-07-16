@@ -1,5 +1,6 @@
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import { fileURLToPath } from 'url';
 import { ensureDir, fileExists, writeFile, copyDir, readJson } from '../utils/file-system.js';
 import { execFileSafe, getNpmExecutable } from './openspec.js';
@@ -189,7 +190,7 @@ export async function installCodegraphOffline(
       scope === 'global'
         ? ['install', '-g', bundle.codegraphTarball]
         : ['install', '--prefix', targetPath, bundle.codegraphTarball];
-    const cwd = scope === 'global' ? require('os').homedir() : targetPath;
+    const cwd = scope === 'global' ? os.homedir() : targetPath;
     await execFileSafe(npmCmd, args, {
       cwd,
       stdio: 'inherit',
@@ -333,11 +334,20 @@ async function npmPack(cwd: string, destDir: string): Promise<string | null> {
     stdio: ['inherit', 'inherit', 'pipe'],
     timeout: 120_000,
   });
-  // 找到 destDir 下最新生成的 .tgz
+  // 找到 destDir 下最新生成的 .tgz（用 mtime 排序，避免字典序选错）
   const entries = await fs.promises.readdir(destDir);
   const tgzs = entries.filter((e: string) => e.endsWith('.tgz'));
   if (tgzs.length === 0) return null;
-  return path.join(destDir, tgzs.sort().reverse()[0]);
+  let latest = tgzs[0];
+  let latestMtime = 0;
+  for (const e of tgzs) {
+    const stat = await fs.promises.stat(path.join(destDir, e));
+    if (stat.mtimeMs > latestMtime) {
+      latestMtime = stat.mtimeMs;
+      latest = e;
+    }
+  }
+  return path.join(destDir, latest);
 }
 
 /** 对远程包执行 npm pack <pkg>，下载到 destDir */
@@ -358,12 +368,19 @@ async function npmPackPackage(pkg: string, destDir: string): Promise<string | nu
     const p = path.isAbsolute(name) ? name : path.join(destDir, path.basename(name));
     if (await fileExists(p)) return p;
   }
-  // 兜底：扫描 destDir
+  // 兜底：扫描 destDir（用 await fs.promises.stat 避免阻塞事件循环）
   const entries = await fs.promises.readdir(destDir);
-  const tgz = entries
-    .filter((e: string) => e.endsWith('.tgz'))
-    .map((e: string) => ({ name: e, mtime: fs.statSync(path.join(destDir, e)).mtimeMs }))
-    .sort((a: { name: string; mtime: number }, b: { name: string; mtime: number }) => b.mtime - a.mtime)[0];
+  const tgzNames = entries.filter((e: string) => e.endsWith('.tgz'));
+  if (tgzNames.length === 0) return null;
+  const stats = await Promise.all(
+    tgzNames.map(async (e: string) => ({
+      name: e,
+      mtime: (await fs.promises.stat(path.join(destDir, e))).mtimeMs,
+    })),
+  );
+  const tgz = stats.sort(
+    (a: { name: string; mtime: number }, b: { name: string; mtime: number }) => b.mtime - a.mtime,
+  )[0];
   return tgz ? path.join(destDir, tgz.name) : null;
 }
 
@@ -371,7 +388,6 @@ async function npmPackPackage(pkg: string, destDir: string): Promise<string | nu
  * 在临时目录中执行 superpowers 在线安装，然后将 skills 目录复制到 bundle。
  */
 async function captureSuperpowersSkills(bundleSuperpowersDir: string): Promise<string | null> {
-  const os = await import('os');
   const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'driv-bundle-sp-'));
   try {
     // 用 opencode 作为 agent 安装到临时项目

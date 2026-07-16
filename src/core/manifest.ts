@@ -26,6 +26,15 @@ const DEFAULT_LANGUAGES = [
   { id: 'zh', name: '中文', skillsDir: 'skills' },
 ];
 
+const DEFAULT_RULES = ['rules/driv-phase-guard.md'];
+
+const DEFAULT_HOOKS: DrivManifest['hooks'] = {
+  'scripts/driv-validate.sh': {
+    matcher: 'Write|Edit',
+    description: 'Driv Phase Guard - Validate workflow state before writing code',
+  },
+};
+
 function buildDefaultManifest(packageVersion: string): DrivManifest {
   return {
     version: '1',
@@ -33,8 +42,10 @@ function buildDefaultManifest(packageVersion: string): DrivManifest {
     assetsVersion: '1',
     skills: [...DEFAULT_SKILLS],
     skillsZh: [...DEFAULT_SKILLS],
-    rules: [],
-    hooks: {},
+    rules: [...DEFAULT_RULES],
+    hooks: Object.fromEntries(
+      Object.entries(DEFAULT_HOOKS).map(([k, v]) => [k, { ...v }]),
+    ),
     languages: DEFAULT_LANGUAGES.map((l) => ({ ...l })),
     createdAt: new Date().toISOString(),
   };

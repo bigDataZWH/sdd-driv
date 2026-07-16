@@ -76,6 +76,12 @@ export class ArchiveService {
     }
 
     try {
+      // 推进阶段状态（catch-up 模式，补齐漏掉的 transition）
+      try {
+        await this.stateMachine.transition(changeName, 'archive');
+      } catch {
+        // transition 失败不阻断 archive 流程
+      }
       await this.fs.ensureDir(archiveDir);
 
       const artifacts = ['proposal.md', 'design.md', 'tasks.md', '.driv.yaml'];
@@ -116,6 +122,9 @@ export class ArchiveService {
         new Date().toISOString(),
       );
 
+      // archive 全流程成功后清理 .backup 文件
+      await this.cleanupBackups(changeName);
+
       return {
         archived: true,
         archivePath: archiveDir,
@@ -125,11 +134,20 @@ export class ArchiveService {
       };
     } catch (err) {
       errors.push((err as Error).message || String(err));
+      // 完整回滚：删除归档目录 + 还原主 spec
       try {
         await this.rollbackForDir(archiveDir);
+        await this.restoreSpecBackups(changeName);
         rollbackPerformed = true;
       } catch {
         // rollback best-effort
+      }
+      // 重置状态字段，避免磁盘与状态不一致
+      try {
+        await this.stateMachine.setField(changeName, 'archived', false);
+        await this.stateMachine.setField(changeName, 'phases.archive.status', 'failed');
+      } catch {
+        // 状态重置 best-effort
       }
       return {
         archived: false,
@@ -192,14 +210,7 @@ export class ArchiveService {
         mergeSucceeded = true;
       }
 
-      // 修复：合并成功后清理 .backup 文件，避免污染 specs 目录
-      if (mergeSucceeded && (await this.fs.exists(backupPath))) {
-        try {
-          await fs.promises.unlink(backupPath);
-        } catch {
-          // 清理失败不阻塞流程
-        }
-      }
+      // .backup 延迟到 archive 全流程成功后清理，失败时 rollback 需要它还原主 spec
       if (mergeSucceeded) merged = true;
     }
 
@@ -273,6 +284,42 @@ export class ArchiveService {
           } catch {
             // 还原失败不阻塞流程
           }
+        }
+      }
+    }
+  }
+
+  /** archive 全流程成功后清理 .backup 文件 */
+  private async cleanupBackups(changeName: string): Promise<void> {
+    const specsDir = path.join(this.root, 'openspec', 'specs');
+    if (!(await this.fs.exists(specsDir))) return;
+    const capabilities = await this.fs.listDir(specsDir);
+    for (const capability of capabilities) {
+      const backupPath = path.join(specsDir, capability, 'spec.md.backup');
+      if (await this.fs.exists(backupPath)) {
+        try {
+          await fs.promises.unlink(backupPath);
+        } catch {
+          // 清理失败不阻塞流程
+        }
+      }
+    }
+  }
+
+  /** 还原被 mergeDeltaSpec 覆盖的主 spec 文件（用于 archive 失败回滚） */
+  private async restoreSpecBackups(changeName: string): Promise<void> {
+    const specsDir = path.join(this.root, 'openspec', 'specs');
+    if (!(await this.fs.exists(specsDir))) return;
+    const capabilities = await this.fs.listDir(specsDir);
+    for (const capability of capabilities) {
+      const backupPath = path.join(specsDir, capability, 'spec.md.backup');
+      const mainPath = path.join(specsDir, capability, 'spec.md');
+      if (await this.fs.exists(backupPath)) {
+        try {
+          await this.fs.copyFile(backupPath, mainPath);
+          await fs.promises.unlink(backupPath);
+        } catch {
+          // 还原失败不阻塞流程
         }
       }
     }

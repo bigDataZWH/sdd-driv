@@ -29,10 +29,10 @@ interface RuleCategory {
 }
 
 const CATEGORIES: Record<string, RuleCategory> = {
-  naming: { rules: ['class-pascal-case', 'var-camel-case', 'const-upper-snake-case'], weight: 15 },
+  naming: { rules: ['class-pascal-case', 'var-camel-case', 'const-upper-snake-case'], weight: 10 },
   function: { rules: ['function-length', 'param-count', 'cyclomatic-complexity'], weight: 25 },
   structure: { rules: ['class-length', 'nesting-depth', 'duplicate-code'], weight: 20 },
-  comments: { rules: ['comment-quality'], weight: 15 },
+  comments: { rules: ['comment-quality'], weight: 10 },
   errors: { rules: ['empty-catch'], weight: 15 },
   security: { rules: ['hardcoded-secret'], weight: 20 },
 };

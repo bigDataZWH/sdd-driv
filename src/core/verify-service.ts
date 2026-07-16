@@ -324,6 +324,12 @@ export class VerifyService {
   }
 
   async verify(changeName: string): Promise<VerifyResult> {
+    // 推进阶段状态（catch-up 模式，补齐漏掉的 transition）
+    try {
+      await this.stateMachine.transition(changeName, 'verify');
+    } catch {
+      // transition 失败不阻断 verify 流程
+    }
     const scale = await this.assessScale(changeName);
     const config = await this.readConfig(changeName);
     const buildPassed = await this.executeBuild(changeName);

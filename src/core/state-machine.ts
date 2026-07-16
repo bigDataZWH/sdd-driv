@@ -126,14 +126,24 @@ export class StateMachine {
     if (currentIndex < 0) {
       throw new Error(`无效的当前阶段: ${currentPhase}`);
     }
-    if (targetIndex !== currentIndex + 1) {
-      throw new Error(`不允许从 ${currentPhase} 转换到 ${toPhase}，只能顺序向前转换`);
+
+    // 已在目标阶段或更靠后：幂等 no-op，不报错
+    if (targetIndex <= currentIndex) {
+      return;
     }
 
     const now = new Date().toISOString();
 
-    state.phases[currentPhase].status = 'completed';
-    state.phases[currentPhase].completedAt = now;
+    // catch-up：标记所有被跳过的中间阶段为 completed
+    for (let i = currentIndex; i < targetIndex; i++) {
+      const phase = PHASE_ORDER[i] as Phase;
+      if (state.phases[phase].status !== 'completed') {
+        state.phases[phase].status = 'completed';
+        if (!state.phases[phase].completedAt) {
+          state.phases[phase].completedAt = now;
+        }
+      }
+    }
 
     state.phases[toPhase as Phase].status = 'in-progress';
     state.phases[toPhase as Phase].startedAt = now;

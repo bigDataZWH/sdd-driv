@@ -169,8 +169,9 @@ function findRuleForName(
 //   3) 替换 {category} 占位符
 function normalizeSearchPath(searchPath: string, category: TemplateCategory): string {
   let normalized = searchPath.replace(/\\/g, '/').replace(/\/$/, '');
-  if (normalized.startsWith('.driv/templates/')) {
-    normalized = normalized.slice('.driv/templates/'.length);
+  // 兼容 '.driv/templates'（无尾斜杠）与 '.driv/templates/...' 两种前缀形式
+  if (normalized === '.driv/templates' || normalized.startsWith('.driv/templates/')) {
+    normalized = normalized.slice('.driv/templates'.length).replace(/^\//, '');
   }
   if (normalized.includes('{category}')) {
     normalized = normalized.replace(/\{category\}/g, category);
@@ -185,9 +186,9 @@ function resolveSearchPath(
   baseName: string,
 ): string {
   const normalized = normalizeSearchPath(searchPath, category);
-  if (normalized.includes('{category}') || normalized === '') {
-    // 包含 {category}（已被替换）或多段路径，直接接 basename
-    return normalized + '/' + baseName;
+  // 空 search_path：回退到默认 custom/<category>/<basename>
+  if (normalized === '') {
+    return `custom/${category}/${baseName}`;
   }
   // 单段路径（如 'custom'）：兼容旧行为，接 /<category>/<basename>
   if (!normalized.includes('/')) {
@@ -205,6 +206,8 @@ export class TemplateManager {
   private frontmatterCache: Map<string, Record<string, unknown> | null> = new Map();
   // 模板内容缓存：key 为 `${type}/${name}`，避免 applyTemplate 等场景重复读盘
   private contentCache: Map<string, string> = new Map();
+  // 模板文件 mtime 缓存：key 与 contentCache 一致，用于检测文件变更后失效内容缓存
+  private mtimeCache: Map<string, number> = new Map();
 
   constructor(fs: FileSystem, root: string, logger?: Logger) {
     this.fs = fs;
@@ -283,10 +286,24 @@ export class TemplateManager {
 
   async loadTemplate(type: TemplateType, name: string): Promise<string> {
     const key = `${type}/${name}`;
-    // 命中内容缓存直接返回，避免重复读盘与解析
-    if (this.contentCache.has(key)) return this.contentCache.get(key)!;
-
     const filePath = this.templatePath(type, name);
+
+    // 读取当前文件 mtime（若文件存在），用于校验缓存是否仍然有效
+    let currentMtime: number | undefined;
+    try {
+      currentMtime = (await this.fs.stat(filePath)).mtimeMs;
+    } catch {
+      // stat 失败：文件可能不存在或权限不足，留待后续 exists/readFile 抛出明确错误
+    }
+
+    // 命中内容缓存：校验 mtime 一致则直接返回，避免重复读盘；不一致则视为缓存失效重新读取
+    if (this.contentCache.has(key) && currentMtime !== undefined) {
+      const cachedMtime = this.mtimeCache.get(key);
+      if (cachedMtime === currentMtime) {
+        return this.contentCache.get(key)!;
+      }
+    }
+
     if (!(await this.fs.exists(filePath))) {
       throw new Error(`模板不存在: ${type}/${name}`);
     }
@@ -294,6 +311,9 @@ export class TemplateManager {
     // 解析 frontmatter 并缓存，供 validateTemplate 等消费
     this.frontmatterCache.set(key, parseFrontmatter(content));
     this.contentCache.set(key, content);
+    if (currentMtime !== undefined) {
+      this.mtimeCache.set(key, currentMtime);
+    }
     return content;
   }
 
@@ -389,11 +409,24 @@ export class TemplateManager {
     return coreContent;
   }
 
-  // 清空所有缓存（configCache、frontmatterCache、contentCache），运行期修改 config.yaml 或模板后可调用以重新加载
+  // 清空所有缓存（configCache、frontmatterCache、contentCache、mtimeCache），运行期修改 config.yaml 或模板后可调用以重新加载
   clearCache(): void {
     this.configCache = null;
     this.frontmatterCache.clear();
     this.contentCache.clear();
+    this.mtimeCache.clear();
+  }
+
+  // 主动失效缓存：传入 type+name 失效单个模板缓存；不传参数则等价于 clearCache
+  invalidate(type?: string, name?: string): void {
+    if (type && name) {
+      const key = `${type}/${name}`;
+      this.contentCache.delete(key);
+      this.frontmatterCache.delete(key);
+      this.mtimeCache.delete(key);
+    } else {
+      this.clearCache();
+    }
   }
 
   async applyTemplate(
@@ -428,10 +461,14 @@ export class TemplateManager {
         if (chain.length > 1) {
           // 从最父级 root（chain[0]）开始向下合并
           let accumulated = await this.loadTemplate(type, chain[0]);
+          // chain 中的元素均为短名形式，对入参 name 同样取短名后再比较，避免 'proposals/feature.md' 与 'feature' 失配
+          const shortNameOfInput = shortName(name);
           for (let i = 1; i < chain.length; i++) {
             const childName = chain[i];
             const childContent =
-              childName === name ? content : await this.loadTemplate(type, childName);
+              shortName(childName) === shortNameOfInput
+                ? content
+                : await this.loadTemplate(type, childName);
             // 查找当前级对应的 rule：优先显式 rules，再 fallback extend
             const r =
               findRuleForName(config.inheritance.rules, childName, type) ??
@@ -524,7 +561,8 @@ export class TemplateManager {
         child: shortName(r.child),
         parent: shortName(r.parent),
       }));
-      return resolveChain(normalizedRules, name);
+      // 对 name 同样做短名规范化，确保完整路径入参（如 'proposals/feature.md'）也能匹配
+      return resolveChain(normalizedRules, shortName(name));
     } catch (error) {
       this.warn(`[driv] 继承链解析失败: ${(error as Error).message}`);
       return [name];

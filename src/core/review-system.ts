@@ -161,10 +161,21 @@ export class ReviewSystemImpl implements ReviewSystem {
         const key = `${type}Review` as keyof typeof state.hwProcess;
         const status = (state.hwProcess[key] as ReviewStatus) ?? 'pending';
 
-        let createdAt = '';
+        let createdAt: string;
         try {
           const stat = await this.fs.stat(reviewPath);
-          createdAt = stat.birthtime.toISOString();
+          const content = await this.fs.readFile(reviewPath);
+          const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
+          if (fmMatch) {
+            const createdMatch = fmMatch[1].match(/^created_at:\s*(.+)$/m);
+            if (createdMatch) {
+              createdAt = createdMatch[1].trim();
+            } else {
+              createdAt = stat.mtime.toISOString();
+            }
+          } else {
+            createdAt = stat.mtime.toISOString();
+          }
         } catch {
           createdAt = new Date().toISOString();
         }

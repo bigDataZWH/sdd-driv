@@ -63,7 +63,7 @@ export class SchemaRegistry {
     }
 
     for (const section of schema.requiredSections) {
-      if (!body.includes(section)) {
+      if (!sectionPresent(body, section)) {
         errors.push(`缺少必需章节: ${section}`);
       }
     }
@@ -79,4 +79,15 @@ export class SchemaRegistry {
     }
     return sections;
   }
+}
+
+// 判断 body 是否包含指定 section。
+// 对 Markdown 标题型 section（以 # 开头）采用行首匹配，避免正文中 "# " 子串被误判为标题；
+// 其他 section 维持 includes 行为，保持自定义 schema 的兼容性。
+function sectionPresent(body: string, section: string): boolean {
+  if (/^#{1,6}\s/.test(section)) {
+    const escaped = section.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp('^' + escaped, 'm').test(body);
+  }
+  return body.includes(section);
 }
