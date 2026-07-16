@@ -1,5 +1,6 @@
 import { Command, Option } from 'commander';
 import { createRequire } from 'module';
+import { pathToFileURL } from 'url';
 import { initCommand } from '../commands/init.js';
 import { statusCommand } from '../commands/status.js';
 import { doctorCommand } from '../commands/doctor.js';
@@ -88,14 +89,22 @@ export function createProgram(): Command {
     .option('--skip-superpowers', 'Skip bundling superpowers skills')
     .option('--json', 'Output as JSON')
     .action(async (targetPath = '.', options) => {
-      await bundleCommand(targetPath, {
-        noNetwork: options.noNetwork,
-        skipDriv: options.skipDriv,
-        skipOpenspec: options.skipOpenspec,
-        skipCodegraph: options.skipCodegraph,
-        skipSuperpowers: options.skipSuperpowers,
-        json: options.json,
-      });
+      try {
+        await bundleCommand(targetPath, {
+          noNetwork: options.noNetwork,
+          skipDriv: options.skipDriv,
+          skipOpenspec: options.skipOpenspec,
+          skipCodegraph: options.skipCodegraph,
+          skipSuperpowers: options.skipSuperpowers,
+          json: options.json,
+        });
+      } catch (error) {
+        if (error instanceof Error && error.name === 'ExitPromptError') {
+          console.log('\n  Cancelled.\n');
+          process.exit(0);
+        }
+        throw error;
+      }
     });
 
   program
@@ -103,7 +112,15 @@ export function createProgram(): Command {
     .description('Show active changes and workflow status')
     .option('--json', 'Output as JSON')
     .action(async (targetPath = '.', options) => {
-      await statusCommand(targetPath, options);
+      try {
+        await statusCommand(targetPath, options);
+      } catch (error) {
+        if (error instanceof Error && error.name === 'ExitPromptError') {
+          console.log('\n  Cancelled.\n');
+          process.exit(0);
+        }
+        throw error;
+      }
     });
 
   program
@@ -114,10 +131,18 @@ export function createProgram(): Command {
       new Option('--scope <scope>', 'Diagnosis scope').choices(['auto', 'global', 'project']),
     )
     .action(async (targetPath = '.', options) => {
-      await doctorCommand(targetPath, {
-        scope: options.scope,
-        json: options.json,
-      });
+      try {
+        await doctorCommand(targetPath, {
+          scope: options.scope,
+          json: options.json,
+        });
+      } catch (error) {
+        if (error instanceof Error && error.name === 'ExitPromptError') {
+          console.log('\n  Cancelled.\n');
+          process.exit(0);
+        }
+        throw error;
+      }
     });
 
   program
@@ -199,7 +224,8 @@ async function main(argv = process.argv) {
 
 export { main };
 
-const isDirectRun = process.argv[1]?.endsWith('index.js') || process.argv[1]?.endsWith('index.ts');
+const isDirectRun =
+  process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isDirectRun) {
   main().catch((err) => {
     console.error(err);

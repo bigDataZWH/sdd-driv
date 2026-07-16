@@ -2,7 +2,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { select, checkbox } from '@inquirer/prompts';
 import { ensureDir, fileExists, writeFile } from '../utils/file-system.js';
-import { createOpenCodeCommands, installDrivSkills, copyDrivRulesForPlatform, installDrivHooksForPlatform } from '../core/skills.js';
+import { createOpenCodeCommands, installDrivSkills, installDrivScripts, copyDrivRulesForPlatform, installDrivHooksForPlatform, OPENSPEC_SKILL_NAMES } from '../core/skills.js';
 import { syncDrivAssets } from '../core/assets.js';
 import { getDrivSkills } from './update.js';
 import { getPackageVersion } from '../core/manifest.js';
@@ -80,7 +80,14 @@ async function printBanner(log: (msg: string) => void): Promise<void> {
 }
 
 function isInteractive(options: InitOptions): boolean {
-  return !options.yes && !options.json && !options.scope && !options.overwrite && !options.skipExisting;
+  if (options.yes || options.json || options.scope || options.overwrite || options.skipExisting || options.offline) {
+    return false;
+  }
+  // 非 TTY 环境（CI、管道、容器）自动降级为非交互模式
+  if (process.stdin.isTTY === false) {
+    return false;
+  }
+  return true;
 }
 
 async function createWorkingDirs(projectPath: string): Promise<void> {
@@ -255,11 +262,11 @@ async function installPlatforms(
     let drivStatus: InstallStatus = 'skipped';
       if (drivAction !== 'skip') {
         const overwrite = drivAction === 'overwrite';
-        const existingSkills = ['openspec-propose', 'openspec-explore', 'openspec-apply-change', 'openspec-archive-change'];
+        const existingSkills = OPENSPEC_SKILL_NAMES;
         const drivSkills = getDrivSkills();
         const allSkillNames = [...existingSkills, ...drivSkills];
 
-        const skillsResult = await installDrivSkills(baseDir, allSkillNames, overwrite, options.skipExisting);
+        const skillsResult = await installDrivSkills(baseDir, allSkillNames, overwrite, options.skipExisting, platform.id, scope);
         const openspecResult = await createOpenCodeCommands(baseDir, existingSkills, overwrite);
         const drivResult = await createOpenCodeCommands(baseDir, drivSkills, overwrite);
 
@@ -274,6 +281,12 @@ async function installPlatforms(
         }
         if (hooksResult.installed) {
           log(`    Hooks: installed`);
+        }
+        if (platform.id === 'opencode') {
+          const scriptsResult = await installDrivScripts(baseDir);
+          if (scriptsResult.copied > 0) {
+            log(`    Scripts: ${scriptsResult.copied} copied`);
+          }
         }
       } else {
         log(`  Driv -> ${platform.name}: skipped (already exists)`);

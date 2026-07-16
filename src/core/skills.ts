@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import { fileURLToPath } from 'url';
 import { fileExists, ensureDir, writeFile, readJson } from '../utils/file-system.js';
 import type { Logger } from '../utils/logger.js';
-import { getPlatformSkillsDir, type Platform } from './platforms.js';
+import { getPlatformSkillsDir, PLATFORMS, type Platform } from './platforms.js';
 import type { InstallScope } from './types.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -28,12 +28,34 @@ description: Run the {skillName} OpenCode workflow
 ---
 `;
 
+export const OPENSPEC_SKILL_NAMES: string[] = [
+  'openspec-propose',
+  'openspec-explore',
+  'openspec-apply-change',
+  'openspec-archive-change',
+];
+
 function getPackageSkillsDir(): string {
   return path.join(DRIV_PACKAGE_ROOT, '.opencode', 'skills');
 }
 
-async function ensureSkillsDir(baseDir: string, skillName: string): Promise<string | null> {
-  const dir = path.join(baseDir, '.opencode', 'skills', skillName);
+function resolveSkillsBaseDir(baseDir: string, platformId?: string, scope?: string): string {
+  if (platformId) {
+    const platform = PLATFORMS.find((p) => p.id === platformId);
+    if (platform) {
+      return path.join(baseDir, getPlatformSkillsDir(platform, (scope ?? 'project') as InstallScope));
+    }
+  }
+  return path.join(baseDir, '.opencode');
+}
+
+async function ensureSkillsDir(
+  baseDir: string,
+  skillName: string,
+  platformId?: string,
+  scope?: string,
+): Promise<string | null> {
+  const dir = path.join(resolveSkillsBaseDir(baseDir, platformId, scope), 'skills', skillName);
   if (await fileExists(dir)) return dir;
   return null;
 }
@@ -43,14 +65,17 @@ export async function installDrivSkills(
   skillNames: string[],
   overwrite: boolean,
   skipExisting?: boolean,
+  platformId?: string,
+  scope?: string,
 ): Promise<{ copied: number; skipped: number }> {
   let copied = 0;
   let skipped = 0;
   const packageSkillsDir = getPackageSkillsDir();
+  const skillsBase = resolveSkillsBaseDir(baseDir, platformId, scope);
 
   for (const skillName of skillNames) {
     const srcSkillFile = path.join(packageSkillsDir, skillName, 'SKILL.md');
-    const destDir = path.join(baseDir, '.opencode', 'skills', skillName);
+    const destDir = path.join(skillsBase, 'skills', skillName);
     const destSkillFile = path.join(destDir, 'SKILL.md');
 
     if (!(await fileExists(srcSkillFile))) {
@@ -73,6 +98,29 @@ export async function installDrivSkills(
     copied++;
   }
 
+  return { copied, skipped };
+}
+
+export async function installDrivScripts(
+  baseDir: string,
+): Promise<{ copied: number; skipped: number }> {
+  let copied = 0;
+  let skipped = 0;
+  const scriptsSourceDir = path.join(DRIV_PACKAGE_ROOT, '.driv', 'scripts');
+  if (!(await fileExists(scriptsSourceDir))) {
+    return { copied, skipped };
+  }
+  const destScriptsDir = path.join(baseDir, '.opencode', 'skills', 'scripts');
+  await ensureDir(destScriptsDir);
+  const entries = await fs.promises.readdir(scriptsSourceDir);
+  for (const entry of entries) {
+    if (entry.endsWith('.sh')) {
+      const src = path.join(scriptsSourceDir, entry);
+      const dest = path.join(destScriptsDir, entry);
+      await fs.promises.copyFile(src, dest);
+      copied++;
+    }
+  }
   return { copied, skipped };
 }
 

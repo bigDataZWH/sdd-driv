@@ -125,9 +125,14 @@ describe('StateMachine', () => {
       expect(state.phases.design.startedAt).toBeDefined();
     });
 
-    it('从 clarify 转换到 build 失败（跳过 design）', async () => {
+    it('从 clarify 转换到 build 成功（catch-up 自动补齐 design）', async () => {
       await stateMachine.initChange('test-change');
-      await expect(stateMachine.transition('test-change', 'build')).rejects.toThrow();
+      await stateMachine.transition('test-change', 'build');
+      const state = await stateMachine.getState('test-change');
+      expect(state.phase).toBe('build');
+      expect(state.phases.clarify.status).toBe('completed');
+      expect(state.phases.design.status).toBe('completed');
+      expect(state.phases.build.status).toBe('in-progress');
     });
 
     it('从 design 回到 clarify 失败（不能回退）', async () => {
@@ -135,10 +140,15 @@ describe('StateMachine', () => {
       await stateMachine.transition('test-change', 'design');
       await expect(stateMachine.transition('test-change', 'clarify')).rejects.toThrow();
     });
-
-    it('不支持从 clarify 直接到 archive', async () => {
+    it('从 clarify 直接 catch-up 到 archive 成功', async () => {
       await stateMachine.initChange('test-change');
-      await expect(stateMachine.transition('test-change', 'archive')).rejects.toThrow();
+      await stateMachine.transition('test-change', 'archive');
+      const state = await stateMachine.getState('test-change');
+      expect(state.phase).toBe('archive');
+      expect(state.phases.clarify.status).toBe('completed');
+      expect(state.phases.design.status).toBe('completed');
+      expect(state.phases.build.status).toBe('completed');
+      expect(state.phases.verify.status).toBe('completed');
     });
 
     it('无效阶段名抛出错误', async () => {
@@ -307,11 +317,12 @@ describe('StateMachine', () => {
       await expect(stateMachine.transition('test-change', 'archive')).rejects.toThrow();
     });
 
-    it('transition 非相邻阶段（clarify → build）抛出错误', async () => {
+    it('transition 非相邻阶段（clarify → build）catch-up 成功', async () => {
       await stateMachine.initChange('test-change');
-      await expect(stateMachine.transition('test-change', 'build')).rejects.toThrow(
-        /不允许从.*转换到/,
-      );
+      await stateMachine.transition('test-change', 'build');
+      const state = await stateMachine.getState('test-change');
+      expect(state.phase).toBe('build');
+      expect(state.phases.design.status).toBe('completed');
     });
 
     it('transition 向后转换（design → clarify）抛出错误', async () => {

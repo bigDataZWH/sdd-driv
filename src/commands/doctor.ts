@@ -3,6 +3,7 @@ import * as os from 'os';
 import { execFileSync } from 'child_process';
 import { fileExists, readDir } from '../utils/file-system.js';
 import { loadManifest, getPackageVersion } from '../core/manifest.js';
+import { PLATFORMS, getPlatformSkillsDir } from '../core/platforms.js';
 
 export interface DoctorOptions {
   scope?: 'auto' | 'project' | 'global';
@@ -155,35 +156,38 @@ async function checkSkillCompleteness(
 ): Promise<DoctorResult[]> {
   const results: DoctorResult[] = [];
   const manifest = await loadManifest(projectPath);
+  const skillList = manifest.skills || [];
 
   let anyFound = false;
   for (const base of getScopeBases(projectPath, scope)) {
-    const skillsDir = path.join(base.baseDir, '.opencode', 'skills');
-    if (!(await fileExists(skillsDir))) continue;
-    anyFound = true;
+    for (const platform of PLATFORMS) {
+      const platformSkillsDir = getPlatformSkillsDir(platform, base.scope);
+      const skillsDir = path.join(base.baseDir, platformSkillsDir, 'skills');
+      if (!(await fileExists(skillsDir))) continue;
+      anyFound = true;
 
-    const missing: string[] = [];
-    const skillList = manifest.skills || [];
-    for (const skillName of skillList) {
-      const skillPath = path.join(skillsDir, skillName, 'SKILL.md');
-      if (!(await fileExists(skillPath))) {
-        missing.push(skillName);
+      const missing: string[] = [];
+      for (const skillName of skillList) {
+        const skillPath = path.join(skillsDir, skillName, 'SKILL.md');
+        if (!(await fileExists(skillPath))) {
+          missing.push(skillName);
+        }
       }
-    }
 
-    results.push(
-      missing.length === 0
-        ? {
-            check: `skills (${base.scope})`,
-            status: 'pass' as const,
-            message: `complete (${skillList.length} skills)`,
-          }
-        : {
-            check: `skills (${base.scope})`,
-            status: 'warn' as const,
-            message: `missing ${missing.length}: ${missing.join(', ')}`,
-          },
-    );
+      results.push(
+        missing.length === 0
+          ? {
+              check: `skills (${platform.id}, ${base.scope})`,
+              status: 'pass' as const,
+              message: `complete (${skillList.length} skills)`,
+            }
+          : {
+              check: `skills (${platform.id}, ${base.scope})`,
+              status: 'warn' as const,
+              message: `missing ${missing.length}: ${missing.join(', ')}`,
+            },
+      );
+    }
   }
 
   if (!anyFound) {

@@ -4,6 +4,7 @@ import { StateMachine } from './state-machine.js';
 import { GitOps } from './git-ops.js';
 import { PathResolver } from './path-resolver.js';
 import { HandoffManager } from './handoff-manager.js';
+import { changeDir } from './types.js';
 
 export interface BuildModeConfig {
   buildMode: string;
@@ -36,7 +37,7 @@ export class BuildOrchestrator {
 
   async createPlan(changeName: string): Promise<string> {
     const state = await this.stateMachine.getState(changeName);
-    const relativePath = `openspec/changes/${changeName}/plan.md`;
+    const relativePath = `${changeDir(changeName)}/plan.md`;
     const absolutePath = path.join(this.pathResolver.root, relativePath);
 
     // 修复：优先复用已有的 handoff 包，避免重复生成破坏 hash 链

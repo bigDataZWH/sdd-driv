@@ -4,6 +4,7 @@ import { FileSystem } from '../utils/file-system.js';
 import { PathResolver } from './path-resolver.js';
 import { YamlParser } from '../utils/yaml-parser.js';
 import { Phase } from './types.js';
+import type { StateMachine } from './state-machine.js';
 
 export interface SourceFile {
   path: string;
@@ -36,13 +37,31 @@ export interface HandoffPackage {
   verification: VerificationInfo;
 }
 
+/**
+ * 稳定的 JSON 序列化：递归排序所有层级的对象键。
+ * 修复 P1-7a：原 `JSON.stringify(obj, Object.keys(obj).sort())` 的 replacer 数组仅作为顶层
+ * 对象的 key 白名单（按其顺序输出），嵌套对象的键仍按插入顺序输出，导致同值对象因键序不同
+ * 产生不同 hash，hash 链不稳定。数组保持原序（仅对象键排序）。
+ */
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return '[' + value.map((v) => stableStringify(v)).join(',') + ']';
+  }
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj).sort();
+  return '{' + keys.map((k) => JSON.stringify(k) + ':' + stableStringify(obj[k])).join(',') + '}';
+}
+
 export class HashUtils {
   static hashString(input: string): string {
     return crypto.createHash('sha256').update(input, 'utf-8').digest('hex');
   }
 
   static hashObject(obj: unknown): string {
-    const str = JSON.stringify(obj, Object.keys(obj as object).sort());
+    const str = stableStringify(obj);
     return HashUtils.hashString(str);
   }
 
@@ -86,6 +105,9 @@ export class HandoffManager {
     private fs: FileSystem,
     private resolver: PathResolver,
     private parser: YamlParser,
+    // P1-7c: 可选 stateMachine，用于在 generate() 写入 totalHash 锚点、在 validate() 交叉校验。
+    // 未注入时跳过锚点读写，保持对 3 参实例化的向后兼容。
+    private stateMachine?: StateMachine,
   ) {}
 
   async collectSourceFiles(changeName: string): Promise<SourceFile[]> {
@@ -152,6 +174,21 @@ export class HandoffManager {
     };
 
     await this.writeHandoffFiles(changeName, handoff);
+
+    // P1-7c: 将 totalHash 写入 state（phases.design.artifacts.handoff-hash）作为外部锚点，
+    // 供 validate() 与 handoff.json 中的 totalHash 交叉校验，防止 handoff.json 被单独篡改
+    if (this.stateMachine) {
+      try {
+        await this.stateMachine.setField(
+          changeName,
+          'phases.design.artifacts.handoff-hash',
+          totalHash,
+        );
+      } catch {
+        // state 不可写时跳过锚点（向后兼容）
+      }
+    }
+
     return handoff;
   }
 
@@ -190,7 +227,30 @@ export class HandoffManager {
       context: handoff.context,
     });
 
-    return expectedTotalHash === handoff.verification.totalHash;
+    if (expectedTotalHash !== handoff.verification.totalHash) {
+      return false;
+    }
+
+    // P1-7b: 检测 changeDir 下未被 handoff.sources 记录的新增 .md 文件
+    const unrecorded = await this.findUnrecordedMarkdownFiles(changeName, handoff);
+    if (unrecorded.length > 0) {
+      return false;
+    }
+
+    // P1-7c: 交叉校验 state 中的 handoff-hash 锚点与 handoff.json 的 totalHash 一致
+    if (this.stateMachine) {
+      try {
+        const state = await this.stateMachine.getState(changeName);
+        const anchor = state.phases?.design?.artifacts?.['handoff-hash'];
+        if (anchor && anchor !== handoff.verification.totalHash) {
+          return false;
+        }
+      } catch {
+        // state 不可读时跳过锚点校验（向后兼容）
+      }
+    }
+
+    return true;
   }
 
   async getMismatchedFiles(changeName: string): Promise<string[]> {
@@ -218,6 +278,14 @@ export class HandoffManager {
         }
       } catch {
         mismatched.push(source.path);
+      }
+    }
+
+    // P1-7b: 新增但未记录到 handoff 的 .md 文件视为 mismatched（其内容未被纳入 hash 链）
+    const unrecorded = await this.findUnrecordedMarkdownFiles(changeName, handoff);
+    for (const file of unrecorded) {
+      if (!mismatched.includes(file)) {
+        mismatched.push(file);
       }
     }
 
@@ -249,6 +317,66 @@ export class HandoffManager {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * 递归收集 dir 下所有 .md 文件路径。
+   * P1-7b: 用于检测新增但未记录到 handoff 的 .md 文件。跳过 .driv（含 handoff.md/handoff.json
+   * 生成产物）、reports、node_modules 及隐藏目录，避免将生成产物/报告误判为未记录工件。
+   */
+  private async collectAllMarkdownFiles(dir: string): Promise<string[]> {
+    const results: string[] = [];
+    let names: string[];
+    try {
+      names = await this.fs.listDir(dir);
+    } catch {
+      return results;
+    }
+    for (const name of names) {
+      const fullPath = path.join(dir, name);
+      let isDir = false;
+      try {
+        isDir = (await this.fs.stat(fullPath)).isDirectory();
+      } catch {
+        // 无法 stat 的条目跳过
+        continue;
+      }
+      if (isDir) {
+        if (
+          name === '.driv' ||
+          name === 'reports' ||
+          name === 'node_modules' ||
+          name.startsWith('.')
+        ) {
+          continue;
+        }
+        const sub = await this.collectAllMarkdownFiles(fullPath);
+        results.push(...sub);
+      } else if (name.endsWith('.md')) {
+        results.push(fullPath);
+      }
+    }
+    return results;
+  }
+
+  /**
+   * 返回 changeDir 下存在、但未被 handoff.sources 记录的 .md 文件路径（已 normalize）。
+   */
+  private async findUnrecordedMarkdownFiles(
+    changeName: string,
+    handoff: HandoffPackage,
+  ): Promise<string[]> {
+    const changeDir = this.resolver.changeDir(changeName);
+    const allMd = await this.collectAllMarkdownFiles(changeDir);
+    const recorded = new Set(handoff.sources.map((s) => this.resolver.normalize(s.path)));
+    const unrecorded: string[] = [];
+    for (const md of allMd) {
+      const normalized = this.resolver.normalize(md);
+      if (!recorded.has(normalized)) {
+        unrecorded.push(normalized);
+      }
+    }
+    return unrecorded;
   }
 
   private async hashAndSummarize(filePath: string): Promise<SourceFile> {

@@ -449,13 +449,16 @@ describe('VerifyService', () => {
         expect(result.passed).toBe(false);
       });
 
-      it('coverage 文件不存在 → coveragePassed=false, coverageSummary undefined', async () => {
+      it('coverage 文件不存在 → coverageSkipped=true，不阻塞 passed', async () => {
         await setupPassingChange('cov-missing');
 
         const result = await verifyService.verify('cov-missing');
 
-        expect(result.coveragePassed).toBe(false);
+        // P1-6: coverage 文件缺失视为跳过而非失败
+        expect(result.coverageSkipped).toBe(true);
         expect(result.coverageSummary).toBeUndefined();
+        // 跳过 coverage 不应阻塞整体验证
+        expect(result.passed).toBe(true);
       });
 
       it('light 模式跳过 coverage 检查（即使 coverage 不达标也通过）', async () => {

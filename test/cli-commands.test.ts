@@ -107,7 +107,8 @@ describe('updateCommand', () => {
       );
 
       const { updateCommand } = await import('../src/commands/update.js');
-      const result = await updateCommand(tmp, { overwrite: true });
+      // scope: 'project' 避免检测到全局 Driv 安装导致 copied 计数受环境影响
+      const result = await updateCommand(tmp, { overwrite: true, scope: 'project', skipNpm: true });
 
       expect(result.commands.copied).toBe(1);
       expect(result.templates.copied).toBeGreaterThan(0);

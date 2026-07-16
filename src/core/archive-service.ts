@@ -210,7 +210,15 @@ export class ArchiveService {
         mergeSucceeded = true;
       }
 
-      // .backup 延迟到 archive 全流程成功后清理，失败时 rollback 需要它还原主 spec
+      // 合并成功后立即清理本次 .backup；合并失败（writeFile 抛错）时 .backup 留存，
+      // 供 archive() catch 块的 restoreSpecBackups 还原主 spec
+      if (mergeSucceeded && mainExists) {
+        try {
+          await fs.promises.unlink(backupPath);
+        } catch {
+          // best-effort
+        }
+      }
       if (mergeSucceeded) merged = true;
     }
 

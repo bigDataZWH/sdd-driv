@@ -337,7 +337,7 @@ export async function updateCommand(
   }
 
   let codegraphStatus: 'installed' | 'failed' | 'skipped' = 'skipped';
-  if (!options.json && !options.yes && !options.scope && !options.language && !options.overwrite && !options.skipNpm) {
+  if (!options.json && !options.yes && !options.scope && !options.language && !options.overwrite && !options.skipNpm && process.stdin.isTTY !== false) {
     const shouldInstallCodegraph = await select({
       message: 'Install/update CodeGraph for semantic code intelligence?',
       choices: [

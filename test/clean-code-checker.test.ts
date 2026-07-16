@@ -259,9 +259,11 @@ describe('CleanCodeChecker', () => {
       const duplicateBlock = `  const x = 1;
   const y = 2;
   const z = 3;
+  const w = 4;
   console.log(x);
   console.log(y);
-  console.log(z);`;
+  console.log(z);
+  console.log(w);`;
       const code = `function first() {
 ${duplicateBlock}
 }

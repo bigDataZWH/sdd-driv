@@ -14,7 +14,12 @@ export class FileSystem {
   }
 
   async ensureDir(dir: string): Promise<void> {
-    await fs.promises.mkdir(path.resolve(dir), { recursive: true });
+    const resolved = path.resolve(dir);
+    // P2-14: 沙箱检查，防止路径穿越到项目根之外
+    if (!isWithinRoot(resolved, this.root)) {
+      throw new Error(`Path ${resolved} is outside project root ${this.root}`);
+    }
+    await fs.promises.mkdir(resolved, { recursive: true });
   }
 
   async writeFile(filePath: string, content: string): Promise<void> {
@@ -44,12 +49,26 @@ export class FileSystem {
   }
 
   async copyFile(src: string, dest: string): Promise<void> {
-    await this.ensureDir(path.dirname(path.resolve(dest)));
-    await fs.promises.copyFile(path.resolve(src), path.resolve(dest));
+    // P2-14: 对 src 和 dest 都做沙箱检查
+    const resolvedSrc = path.resolve(src);
+    const resolvedDest = path.resolve(dest);
+    if (!isWithinRoot(resolvedSrc, this.root)) {
+      throw new Error(`Source ${resolvedSrc} is outside project root ${this.root}`);
+    }
+    if (!isWithinRoot(resolvedDest, this.root)) {
+      throw new Error(`Destination ${resolvedDest} is outside project root ${this.root}`);
+    }
+    await this.ensureDir(path.dirname(resolvedDest));
+    await fs.promises.copyFile(resolvedSrc, resolvedDest);
   }
 
   async listDir(dir: string): Promise<string[]> {
-    const entries = await fs.promises.readdir(path.resolve(dir), { withFileTypes: true });
+    const resolved = path.resolve(dir);
+    // P2-14: 沙箱检查，防止列出项目根外的目录
+    if (!isWithinRoot(resolved, this.root)) {
+      throw new Error(`Path ${resolved} is outside project root ${this.root}`);
+    }
+    const entries = await fs.promises.readdir(resolved, { withFileTypes: true });
     return entries.map((e) => e.name);
   }
 

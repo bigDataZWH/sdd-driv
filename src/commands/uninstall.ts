@@ -3,6 +3,7 @@ import * as os from 'os';
 import { select } from '@inquirer/prompts';
 import { fileExists, readDir, removeFile, removeDir, isDirEmpty } from '../utils/file-system.js';
 import { getDrivSkills } from './update.js';
+import { OPENSPEC_SKILL_NAMES } from '../core/skills.js';
 import { PLATFORMS, getPlatformSkillsDir, type Platform } from '../core/platforms.js';
 import { getBaseDir, hasSkills } from '../core/detect.js';
 import type { InstallScope } from '../core/types.js';
@@ -33,7 +34,7 @@ async function removeDrivSkillsForPlatform(
   scope: InstallScope = 'project',
 ): Promise<{ skillsRemoved: number; commandsRemoved: number }> {
   const drivSkills = getDrivSkills();
-  const extraSkills = ['openspec-propose', 'openspec-apply', 'openspec-explore', 'openspec-archive'];
+  const extraSkills = OPENSPEC_SKILL_NAMES;
   const allSkills = [...drivSkills, ...extraSkills];
 
   const skillsDir = getPlatformSkillsDir(platform, scope);

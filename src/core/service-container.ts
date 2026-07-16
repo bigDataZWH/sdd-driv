@@ -31,7 +31,7 @@ export function createServices(root: string): ServiceContainer {
   const resolver = new PathResolver(root);
   const stateMachine = new StateMachine(fs, parser, resolver);
   const templateManager = new TemplateManager(fs, root);
-  const handoffManager = new HandoffManager(fs, resolver, parser);
+  const handoffManager = new HandoffManager(fs, resolver, parser, stateMachine);
   const phaseGuard = new PhaseGuardImpl(
     new DirtyWorktreeChecker(root),
     handoffManager,

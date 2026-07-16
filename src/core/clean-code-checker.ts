@@ -59,6 +59,24 @@ function makeIssue(
 const UPPER_SNAKE_RE = /^[A-Z][A-Z0-9_]*$/;
 const CAMEL_CASE_RE = /^[a-z][a-zA-Z0-9]*$/;
 
+/** P3: 阈值集中定义，便于维护与调优 */
+const LIMITS = {
+  /** 函数最大行数 */
+  FUNCTION_LENGTH: 50,
+  /** 函数最大参数数 */
+  PARAM_COUNT: 5,
+  /** 最大圈复杂度 */
+  CYCLOMATIC_COMPLEXITY: 10,
+  /** 类最大行数 */
+  CLASS_LENGTH: 500,
+  /** 最大嵌套深度 */
+  NESTING_DEPTH: 4,
+  /** 重复代码块最小行数 */
+  DUPLICATE_BLOCK: 8,
+  /** 通过分数 */
+  PASS_SCORE: 80,
+} as const;
+
 function checkClassPascalCase(content: string, filePath?: string): CodeIssue[] {
   const issues: CodeIssue[] = [];
   const re = /class\s+(\w+)/g;
@@ -123,10 +141,16 @@ function checkVarCamelCase(content: string, filePath?: string): CodeIssue[] {
 
 function checkConstUpperSnakeCase(content: string, filePath?: string): CodeIssue[] {
   const issues: CodeIssue[] = [];
-  const re = /const\s+(\w+)\s*=/g;
+  const re = /const\s+(\w+)\s*=\s*(.+)$/gm;
   let m: RegExpExecArray | null;
   while ((m = re.exec(content)) !== null) {
     const name = m[1];
+    const value = m[2].trim();
+    // 跳过 camelCase const（由 var-camel-case 检查）
+    if (CAMEL_CASE_RE.test(name)) continue;
+    // 仅对字面量常量（数字/字符串/布尔/null）要求 UPPER_SNAKE
+    const isLiteral = /^['"`]/.test(value) || /^\d/.test(value) || /^(true|false|null)\b/.test(value);
+    if (!isLiteral) continue;
     if (!UPPER_SNAKE_RE.test(name)) {
       const lineNum = content.slice(0, m.index).split('\n').length;
       issues.push(
@@ -149,12 +173,71 @@ interface FuncBlock {
   bodyEnd: number;
 }
 
+/** 把字符串和注释内容替换为等长空格，便于准确计数括号/关键词 */
+function stripStringsAndComments(content: string): string {
+  let result = '';
+  let i = 0;
+  let inString: false | '"' | "'" | '`' = false;
+  while (i < content.length) {
+    const ch = content[i];
+    const next = content[i + 1];
+    // 行注释
+    if (!inString && ch === '/' && next === '/') {
+      const end = content.indexOf('\n', i);
+      const lineEnd = end === -1 ? content.length : end;
+      result += ' '.repeat(lineEnd - i);
+      i = lineEnd;
+      continue;
+    }
+    // 块注释
+    if (!inString && ch === '/' && next === '*') {
+      const end = content.indexOf('*/', i + 2);
+      const blockEnd = end === -1 ? content.length : end + 2;
+      for (let j = i; j < blockEnd; j++) {
+        result += content[j] === '\n' ? '\n' : ' ';
+      }
+      i = blockEnd;
+      continue;
+    }
+    // 字符串
+    if (!inString && (ch === '"' || ch === "'" || ch === '`')) {
+      inString = ch;
+      result += ' ';
+      i++;
+      continue;
+    }
+    if (inString) {
+      if (ch === '\\') {
+        result += '  ';
+        i += 2;
+        continue;
+      }
+      if (ch === inString) {
+        inString = false;
+      }
+      result += ch === '\n' ? '\n' : ' ';
+      i++;
+      continue;
+    }
+    result += ch;
+    i++;
+  }
+  return result;
+}
+
 function findFunctionBodies(content: string): FuncBlock[] {
   const blocks: FuncBlock[] = [];
   const lines = content.split('\n');
-  const funcRe = /function\s+\w+\s*\(/;
+  // 命名函数声明 + 箭头函数 + 函数表达式 + 方法简写
+  const funcRes = [
+    /function\s+\w+\s*\(/,
+    /(?:const|let|var)\s+\w+\s*=\s*(?:async\s*)?\([^)]*\)\s*=>/,
+    /(?:const|let|var)\s+\w+\s*=\s*(?:async\s*)?function\s*\(/,
+    /^\s*(?:async\s+)?(\w+)\s*\([^)]*\)\s*\{/,
+  ];
   for (let i = 0; i < lines.length; i++) {
-    if (funcRe.test(lines[i])) {
+    const matched = funcRes.some((re) => re.test(lines[i]));
+    if (matched) {
       const bodyStart = lines[i].includes('{') ? i : findBlockStart(lines, i);
       if (bodyStart < 0) continue;
       const bodyEnd = findMatchingBrace(lines, bodyStart);
@@ -228,13 +311,13 @@ function checkFunctionLength(content: string, filePath?: string): CodeIssue[] {
   const funcs = findFunctionBodies(content);
   for (const f of funcs) {
     const lineCount = f.bodyEnd - f.bodyStart + 1;
-    if (lineCount > 50) {
+    if (lineCount > LIMITS.FUNCTION_LENGTH) {
       const funcLine = content.split('\n')[f.startLine]?.trim() || 'anonymous';
       issues.push(
         makeIssue(
           'function-length',
           'major',
-          `函数 "${funcLine}" 有 ${lineCount} 行（超过 50 行限制）`,
+          `函数 "${funcLine}" 有 ${lineCount} 行（超过 ${LIMITS.FUNCTION_LENGTH} 行限制）`,
           filePath,
           f.startLine + 1,
         ),
@@ -256,13 +339,13 @@ function checkParamCount(content: string, filePath?: string): CodeIssue[] {
           .map((p) => p.trim())
           .filter(Boolean).length
       : 0;
-    if (count > 5) {
+    if (count > LIMITS.PARAM_COUNT) {
       const lineNum = content.slice(0, m.index).split('\n').length;
       issues.push(
         makeIssue(
           'param-count',
           'major',
-          `函数有 ${count} 个参数（超过 5 个限制）`,
+          `函数有 ${count} 个参数（超过 ${LIMITS.PARAM_COUNT} 个限制）`,
           filePath,
           lineNum,
         ),
@@ -278,13 +361,13 @@ function checkParamCount(content: string, filePath?: string): CodeIssue[] {
           .map((p) => p.trim())
           .filter(Boolean).length
       : 0;
-    if (count > 5) {
+    if (count > LIMITS.PARAM_COUNT) {
       const lineNum = content.slice(0, m.index).split('\n').length;
       issues.push(
         makeIssue(
           'param-count',
           'major',
-          `箭头函数有 ${count} 个参数（超过 5 个限制）`,
+          `箭头函数有 ${count} 个参数（超过 ${LIMITS.PARAM_COUNT} 个限制）`,
           filePath,
           lineNum,
         ),
@@ -302,6 +385,8 @@ function checkCyclomaticComplexity(content: string, filePath?: string): CodeIssu
       .split('\n')
       .slice(f.bodyStart, f.bodyEnd + 1)
       .join('\n');
+    // 清洗字符串和注释，避免误计数
+    const cleaned = stripStringsAndComments(body);
     let complexity = 1;
     const patterns = [
       /\bif\s*\(/g,
@@ -317,17 +402,17 @@ function checkCyclomaticComplexity(content: string, filePath?: string): CodeIssu
     for (const pattern of patterns) {
       const re = new RegExp(pattern.source, 'g');
       let pm: RegExpExecArray | null;
-      while ((pm = re.exec(body)) !== null) {
+      while ((pm = re.exec(cleaned)) !== null) {
         complexity++;
       }
     }
-    if (complexity > 10) {
+    if (complexity > LIMITS.CYCLOMATIC_COMPLEXITY) {
       const funcLine = content.split('\n')[f.startLine]?.trim() || 'anonymous';
       issues.push(
         makeIssue(
           'cyclomatic-complexity',
           'major',
-          `函数 "${funcLine}" 圈复杂度为 ${complexity}（超过 10 限制）`,
+          `函数 "${funcLine}" 圈复杂度为 ${complexity}（超过 ${LIMITS.CYCLOMATIC_COMPLEXITY} 限制）`,
           filePath,
           f.startLine + 1,
         ),
@@ -376,12 +461,12 @@ function checkClassLength(content: string, filePath?: string): CodeIssue[] {
   const classes = findClassBlocks(content);
   for (const c of classes) {
     const lineCount = c.endLine - c.startLine + 1;
-    if (lineCount > 500) {
+    if (lineCount > LIMITS.CLASS_LENGTH) {
       issues.push(
         makeIssue(
           'class-length',
           'major',
-          `类 "${c.name}" 有 ${lineCount} 行（超过 500 行限制）`,
+          `类 "${c.name}" 有 ${lineCount} 行（超过 ${LIMITS.CLASS_LENGTH} 行限制）`,
           filePath,
           c.startLine + 1,
         ),
@@ -393,7 +478,9 @@ function checkClassLength(content: string, filePath?: string): CodeIssue[] {
 
 function checkNestingDepth(content: string, filePath?: string): CodeIssue[] {
   const issues: CodeIssue[] = [];
-  const lines = content.split('\n');
+  // 清洗字符串和注释，避免对象字面量、模板字符串中的 {} 被误计数
+  const cleaned = stripStringsAndComments(content);
+  const lines = cleaned.split('\n');
   let maxDepth = 0;
   let currentDepth = 0;
   for (let i = 0; i < lines.length; i++) {
@@ -403,9 +490,9 @@ function checkNestingDepth(content: string, filePath?: string): CodeIssue[] {
     }
     if (currentDepth > maxDepth) maxDepth = currentDepth;
   }
-  if (maxDepth > 4) {
+  if (maxDepth > LIMITS.NESTING_DEPTH) {
     issues.push(
-      makeIssue('nesting-depth', 'major', `代码嵌套深度为 ${maxDepth}（超过 4 层限制）`, filePath),
+      makeIssue('nesting-depth', 'major', `代码嵌套深度为 ${maxDepth}（超过 ${LIMITS.NESTING_DEPTH} 层限制）`, filePath),
     );
   }
   return issues;
@@ -414,12 +501,16 @@ function checkNestingDepth(content: string, filePath?: string): CodeIssue[] {
 function checkDuplicateCode(content: string, filePath?: string): CodeIssue[] {
   const issues: CodeIssue[] = [];
   const lines = content.split('\n');
-  const minBlock = 5;
+  const minBlock = LIMITS.DUPLICATE_BLOCK;
+  const importRe = /^\s*(import\s|export\s|const\s+\w+\s*=\s*require\s*\(|\/\/)/;
   const seen = new Map<string, number[]>();
   for (let i = 0; i <= lines.length - minBlock; i++) {
     const block = lines.slice(i, i + minBlock).join('\n');
     const trimmed = block.trim();
     if (!trimmed) continue;
+    // 跳过纯 import/require/comment 窗口
+    const blockLines = lines.slice(i, i + minBlock);
+    if (blockLines.every((l) => importRe.test(l) || l.trim() === '')) continue;
     if (!seen.has(trimmed)) {
       seen.set(trimmed, [i]);
     } else {
@@ -480,25 +571,16 @@ function checkCommentQuality(content: string, filePath?: string): CodeIssue[] {
 
 function checkEmptyCatch(content: string, filePath?: string): CodeIssue[] {
   const issues: CodeIssue[] = [];
-  const re = /catch\s*\([^)]*\)\s*\{[\s]*\}/g;
+  const seenLines = new Set<number>();
+  // 统一用通用正则，避免单行/多行正则同时匹配导致重复扣分
+  const re = /catch\s*\([^)]*\)\s*\{([^}]*)\}/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(content)) !== null) {
-    const lineNum = content.slice(0, m.index).split('\n').length;
-    issues.push(
-      makeIssue(
-        'empty-catch',
-        'critical',
-        '发现空 catch 块，应至少记录错误日志',
-        filePath,
-        lineNum,
-      ),
-    );
-  }
-  const multiLineRe = /catch\s*\([^)]*\)\s*\{([^}]*)\}/g;
-  while ((m = multiLineRe.exec(content)) !== null) {
     const body = m[1].trim();
     if (body === '' || body === '\n' || body === '\r\n') {
       const lineNum = content.slice(0, m.index).split('\n').length;
+      if (seenLines.has(lineNum)) continue;
+      seenLines.add(lineNum);
       issues.push(
         makeIssue(
           'empty-catch',
@@ -524,9 +606,28 @@ function checkHardcodedSecret(content: string, filePath?: string): CodeIssue[] {
     /(?:private[_-]?key|privatekey)\s*[:=]\s*['"][^'"]+['"]/gi,
     /['"](?:sk-|pk-|test-|live_)[A-Za-z0-9_\-]{8,}['"]/g,
   ];
+  // 白名单前缀：测试/mock/example 值不算硬编码密钥
+  const whitelistRe = /^(test_|example_|mock_|fake_)/i;
+  // 低熵值（长度<12 或无混合大小写+数字）不算高熵密钥
+  const isLowEntropy = (val: string): boolean => {
+    if (val.length < 12) return true;
+    const hasUpper = /[A-Z]/.test(val);
+    const hasLower = /[a-z]/.test(val);
+    const hasDigit = /\d/.test(val);
+    const hasSymbol = /[^A-Za-z0-9]/.test(val);
+    return !(hasUpper && hasLower && hasDigit && hasSymbol);
+  };
+  // 常见非密钥变量名白名单
+  const benignNameRe = /csrf|csrfToken/i;
   for (const pattern of secretPatterns) {
     let m: RegExpExecArray | null;
     while ((m = pattern.exec(content)) !== null) {
+      const matched = m[0];
+      // 提取引号内的值
+      const valMatch = matched.match(/['"]([^'"]+)['"]/);
+      const val = valMatch ? valMatch[1] : '';
+      if (whitelistRe.test(val)) continue;
+      if (benignNameRe.test(matched) && isLowEntropy(val)) continue;
       const lineNum = content.slice(0, m.index).split('\n').length;
       issues.push(
         makeIssue(
@@ -570,7 +671,7 @@ function calculateScore(issues: CodeIssue[]): {
 
   const rawTotal = Object.values(categoryScores).reduce((s, v) => s + v, 0);
   const normalizedScore = Math.round((rawTotal / MAX_RAW) * 100);
-  const passed = normalizedScore >= 80 && !hasCritical;
+  const passed = normalizedScore >= LIMITS.PASS_SCORE && !hasCritical;
 
   return { score: normalizedScore, passed, categoryScores };
 }

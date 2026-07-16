@@ -6,6 +6,34 @@ import { Phase, ChangeState, createDefaultState } from './types.js';
 
 const PHASE_ORDER: Phase[] = ['clarify', 'design', 'build', 'verify', 'archive'];
 
+/** Verify 规模判定的阈值（P2-4: 配置化，避免散落的魔法数字） */
+export const SCALE_THRESHOLDS = {
+  /** 任务数达到此值则判定为 full */
+  tasks: 3,
+  /** 变更文件数达到此值则判定为 full */
+  files: 4,
+  /** spec capability 数达到此值则判定为 full */
+  specs: 2,
+} as const;
+
+export type VerifyScale = 'light' | 'full';
+
+/** 统一的 Verify 规模判定逻辑（P2-2: 消除 state-machine 与 verify-service 的重复实现） */
+export function classifyScale(
+  taskCount: number,
+  fileCount: number,
+  specCount: number,
+): VerifyScale {
+  if (
+    taskCount >= SCALE_THRESHOLDS.tasks ||
+    fileCount >= SCALE_THRESHOLDS.files ||
+    specCount >= SCALE_THRESHOLDS.specs
+  ) {
+    return 'full';
+  }
+  return 'light';
+}
+
 function validateChangeState(data: unknown): ChangeState {
   if (!data || typeof data !== 'object') throw new Error('Invalid state: not an object');
   const obj = data as Record<string, unknown>;
@@ -127,8 +155,15 @@ export class StateMachine {
       throw new Error(`无效的当前阶段: ${currentPhase}`);
     }
 
-    // 已在目标阶段或更靠后：幂等 no-op，不报错
-    if (targetIndex <= currentIndex) {
+    // 向后转换（回退到更早的阶段）不允许
+    if (targetIndex < currentIndex) {
+      throw new Error(`不允许从 ${currentPhase} 转换到 ${toPhase}，只能顺序向前转换`);
+    }
+    // 已在目标阶段：幂等 no-op，不报错（archive 终态除外）
+    if (targetIndex === currentIndex) {
+      if (currentPhase === 'archive') {
+        throw new Error(`不允许从 ${currentPhase} 转换到 ${toPhase}，archive 是终态`);
+      }
       return;
     }
 
@@ -154,10 +189,8 @@ export class StateMachine {
   }
 
   assessScale(tasks: string[], changedFiles: string[]): string {
-    if (tasks.length >= 3 || changedFiles.length >= 4) {
-      return 'full';
-    }
-    return 'light';
+    // P2-2: 委托给统一的 classifyScale，避免与 verify-service 的判定逻辑分歧
+    return classifyScale(tasks.length, changedFiles.length, 0);
   }
 
   async setPrdPath(changeName: string, prdPath: string): Promise<void> {

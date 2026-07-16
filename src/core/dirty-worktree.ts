@@ -1,5 +1,6 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { OPENSPEC_CHANGES_DIR } from './types.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -56,7 +57,7 @@ export class DirtyWorktreeChecker {
       let category: WorktreeChange['category'] = 'unknown';
       if (p.includes(`changes/${changeName}/`)) {
         category = 'change';
-      } else if (p.includes('openspec/changes/')) {
+      } else if (p.includes(`${OPENSPEC_CHANGES_DIR}/`)) {
         category = 'user';
       }
       return { path: p, type, category };

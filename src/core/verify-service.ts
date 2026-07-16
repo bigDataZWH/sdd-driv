@@ -1,12 +1,12 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import { FileSystem } from '../utils/file-system.js';
-import { StateMachine } from './state-machine.js';
+import { StateMachine, classifyScale, type VerifyScale } from './state-machine.js';
 import { CleanCodeChecker } from './clean-code-checker.js';
 import { ScriptExec } from '../utils/script-exec.js';
 import { DebugGate, DebugGateResult } from './debug-gate.js';
 
-export type VerifyScale = 'light' | 'full';
+export type { VerifyScale };
 
 /** 覆盖率阈值（可通过 .driv/config.yaml 覆盖） */
 export interface CoverageThresholds {
@@ -32,6 +32,8 @@ export interface VerifyConfig {
   coverageThresholds: CoverageThresholds;
   /** light 模式下是否跳过 coverage/lint/typecheck（默认 false，向后兼容） */
   skipLightChecks?: boolean;
+  /** 用户显式配置的 verify 模式（来自 .driv/config.yaml 的 defaults.verify_mode / verify.verify_mode） */
+  verifyMode?: VerifyScale;
 }
 
 const DEFAULT_VERIFY_CONFIG: VerifyConfig = {
@@ -91,8 +93,9 @@ export class VerifyService {
   private scriptExec: ScriptExec;
   private root: string;
   private debugGate: DebugGate;
-  // 配置缓存：避免每次 verify() 都重新读取 .driv/config.yaml
-  private configCache: VerifyConfig | null = null;
+  // 配置缓存：以 changeName 为 key，避免每次 verify() 都重新读取 .driv/config.yaml
+  // 修复 P1-5a：原为单值缓存，会跨 change 复用配置（如 change A 读到 config 后 change B 命中缓存复用错误配置）
+  private configCache: Map<string, VerifyConfig> = new Map();
 
   constructor(
     fs: FileSystem,
@@ -143,10 +146,8 @@ export class VerifyService {
       specCount = 0;
     }
 
-    if (tasks.length >= 3 || fileCount >= 4 || specCount >= 2) {
-      return 'full';
-    }
-    return 'light';
+    // P2-2/P2-4: 使用统一的 classifyScale + SCALE_THRESHOLDS，消除魔法数字
+    return classifyScale(tasks.length, fileCount, specCount);
   }
 
   /**
@@ -154,7 +155,10 @@ export class VerifyService {
    * 优先级：change 级 > 项目级 > 默认值。结果会被缓存。
    */
   private async readConfig(changeName?: string): Promise<VerifyConfig> {
-    if (this.configCache) return this.configCache;
+    // P1-5a: 以 changeName 为 key 缓存，避免跨 change 复用配置
+    const cacheKey = changeName || '__global__';
+    const cached = this.configCache.get(cacheKey);
+    if (cached) return cached;
 
     const candidates: string[] = [];
     // change 级配置（优先）
@@ -175,6 +179,14 @@ export class VerifyService {
         const verify = (raw?.verify ?? {}) as Record<string, unknown>;
         const coverage = (verify.coverage ?? {}) as Record<string, unknown>;
         const thresholds = (coverage.thresholds ?? {}) as Record<string, unknown>;
+        const defaults = (raw?.defaults ?? {}) as Record<string, unknown>;
+
+        // P1-5c: 读取用户显式配置的 verifyMode（verify.verify_mode 优先于 defaults.verify_mode）
+        const verifyModeRaw = verify.verify_mode ?? defaults.verify_mode;
+        const verifyMode =
+          verifyModeRaw === 'light' || verifyModeRaw === 'full'
+            ? (verifyModeRaw as VerifyScale)
+            : undefined;
 
         const config: VerifyConfig = {
           buildCmd: String(verify.build_cmd ?? raw?.buildCmd ?? DEFAULT_VERIFY_CONFIG.buildCmd),
@@ -190,16 +202,17 @@ export class VerifyService {
           skipLightChecks: Boolean(
             verify.skip_light_checks ?? DEFAULT_VERIFY_CONFIG.skipLightChecks,
           ),
+          verifyMode,
         };
-        this.configCache = config;
+        this.configCache.set(cacheKey, config);
         return config;
       } catch {
         // 继续尝试下一个候选路径
       }
     }
 
-    this.configCache = DEFAULT_VERIFY_CONFIG;
-    return this.configCache;
+    this.configCache.set(cacheKey, DEFAULT_VERIFY_CONFIG);
+    return DEFAULT_VERIFY_CONFIG;
   }
 
   async executeBuild(changeName: string): Promise<boolean> {
@@ -214,10 +227,18 @@ export class VerifyService {
 
   private async readCoverage(thresholds: CoverageThresholds): Promise<{
     passed: boolean;
+    skipped?: boolean;
     summary?: VerifyResult['coverageSummary'];
   }> {
+    const coveragePath = path.join(this.root, 'coverage', 'coverage-summary.json');
     try {
-      const coveragePath = path.join(this.root, 'coverage', 'coverage-summary.json');
+      await fs.promises.access(coveragePath);
+    } catch {
+      // P1-6: coverage 文件不存在视为「跳过」而非「失败」。
+      // 不要求每个 change 都提供覆盖率数据；跳过不阻塞整体验证。
+      return { passed: true, skipped: true };
+    }
+    try {
       const content = await fs.promises.readFile(coveragePath, 'utf-8');
       const data = JSON.parse(content);
       // coverage-summary.json 格式：{ total: { lines: { pct: 80 }, functions: { pct: 82 }, branches: { pct: 70 }, statements: { pct: 80 } } }
@@ -236,7 +257,7 @@ export class VerifyService {
         summary.statements >= thresholds.statements;
       return { passed, summary };
     } catch {
-      // coverage 文件不存在，视为未通过（要求显式提供覆盖率数据）
+      // coverage 文件存在但读取/解析失败：视为未通过
       return { passed: false };
     }
   }
@@ -327,11 +348,28 @@ export class VerifyService {
     // 推进阶段状态（catch-up 模式，补齐漏掉的 transition）
     try {
       await this.stateMachine.transition(changeName, 'verify');
-    } catch {
-      // transition 失败不阻断 verify 流程
+    } catch (err) {
+      // P2-1: transition 失败不阻断 verify 流程，但记录原因便于排查
+      console.warn(`[driv:verify] transition('verify') failed for ${changeName}:`, (err as Error).message);
     }
-    const scale = await this.assessScale(changeName);
     const config = await this.readConfig(changeName);
+    // P1-5c: 优先使用用户显式配置的 verifyMode（config.verifyMode）；其次尊重 state.verifyMode==='full'
+    // （视为权威 full，以区分"默认 light"与"显式 full"，避免 createDefaultState 硬编码 light 覆盖真实规模）；
+    // 否则按规模（assessScale）自动判定
+    let stateVerifyMode: string | undefined;
+    try {
+      const state = await this.stateMachine.getState(changeName);
+      stateVerifyMode = state.verifyMode;
+    } catch (err) {
+      // P2-1: state 读取失败时降级为 undefined（按 assessScale 判定），但记录原因
+      console.warn(`[driv:verify] getState failed for ${changeName}:`, (err as Error).message);
+      stateVerifyMode = undefined;
+    }
+    const scale: VerifyScale = config.verifyMode
+      ? config.verifyMode
+      : stateVerifyMode === 'full'
+        ? 'full'
+        : await this.assessScale(changeName);
     const buildPassed = await this.executeBuild(changeName);
     const testsPassed = await this.executeTests(changeName);
 
@@ -350,21 +388,23 @@ export class VerifyService {
           }
         }
       }
-    } catch {
+    } catch (err) {
+      // P2-1: clean-code 扫描失败时不阻塞 verify（视为通过），但记录原因
+      console.warn(`[driv:verify] clean-code scan failed:`, (err as Error).message);
       cleanCodePassed = true;
     }
 
-    // 修复：light 模式自动跳过 coverage/lint/typecheck（与"轻量验证"语义一致）
-    // full 模式才执行完整检查套件
-    // 注：可通过 .driv/config.yaml 的 verify.disable_light_skip=true 禁用此行为
-    const skipLightChecks = scale === 'light';
-    let coverage: { passed: boolean; summary?: VerifyResult['coverageSummary'] };
+    // P1-5b: light 模式或显式 skipLightChecks 配置时跳过 coverage/lint/typecheck
+    const skipLightChecks = config.skipLightChecks === true || scale === 'light';
+    let coverage: { passed: boolean; skipped?: boolean; summary?: VerifyResult['coverageSummary'] };
     let coverageSkipped = false;
     if (skipLightChecks) {
       coverage = { passed: true };
       coverageSkipped = true;
     } else {
       coverage = await this.readCoverage(config.coverageThresholds);
+      // P1-6: readCoverage 在 coverage 文件缺失时返回 skipped=true，将其接到 VerifyResult.coverageSkipped
+      coverageSkipped = coverage.skipped === true;
     }
 
     const lintPassed = skipLightChecks ? true : await this.executeLint(changeName);
