@@ -76,6 +76,53 @@ driv init
 5. Create the `.driv/config.yaml` default configuration
 6. Create the `.driv/templates/` default templates
 
+## Offline Installation
+
+Driv supports fully offline installation. On a machine **with** network access, prepare a bundle
+containing driv itself plus its dependencies (OpenSpec, CodeGraph tarballs and Superpowers skills);
+then transfer the bundle to the **offline** machine and run `driv init` against it.
+
+**Step 1 — Prepare the bundle (online machine):**
+
+```bash
+driv bundle ./my-bundle
+```
+
+This produces:
+
+```
+my-bundle/
+├── bundle.json                  # Bundle manifest
+├── driv-<version>.tgz           # driv npm tarball
+├── openspec-<version>.tgz       # OpenSpec npm tarball
+├── codegraph-<version>.tgz      # CodeGraph npm tarball
+└── superpowers/skills/<name>/   # Superpowers skills
+```
+
+**Step 2 — Install driv from the bundle (offline machine):**
+
+```bash
+npm install -g ./my-bundle/driv-*.tgz
+```
+
+**Step 3 — Initialize the project using the bundle (offline machine):**
+
+```bash
+cd your-project
+driv init --offline --bundle ./my-bundle
+```
+
+In offline mode:
+
+- Driv skills, rules, hooks, and templates are copied from the installed package (no network)
+- OpenSpec gets a minimal `openspec/config.yaml` written directly (no `npx`)
+- Superpowers skills are copied from the bundle's `superpowers/skills/` directory
+- CodeGraph is installed from the bundle's local tarball via `npm install <tarball>` (no registry)
+
+If you only have the driv tarball (no dependency bundle), you can still initialize with
+`driv init --offline` — driv skills/templates install offline, OpenSpec gets a minimal config, and
+Superpowers/CodeGraph are skipped (they require the bundle).
+
 ## CLI Commands
 
 | Command           | Description                                |
@@ -85,6 +132,7 @@ driv init
 | `driv doctor`     | Diagnose installation health               |
 | `driv update`     | Sync commands, skills, templates and scripts |
 | `driv review`     | Manage review creation, submission and status checks |
+| `driv bundle`     | Prepare an offline bundle with driv and dependencies |
 | `driv uninstall`  | Remove Driv skills and commands            |
 | `driv --help`     | Show help                                  |
 | `driv --version`  | Show version                               |
@@ -101,6 +149,8 @@ Installs OpenSpec, Superpowers, and Driv skills for the OpenCode platform.
 | `--overwrite`       | Overwrite existing files                                                 |
 | `--scope <scope>`   | Install scope: `project` or `global`                                     |
 | `--json`            | Output structured JSON                                                   |
+| `--offline`         | Offline mode: skip all network operations, use offline fallbacks         |
+| `--bundle <path>`   | Offline bundle directory to install dependencies from (use with `--offline`) |
 
 </details>
 
@@ -165,6 +215,24 @@ Creates, submits, and checks requirement / technical / code reviews for an activ
 | `--type <type>`   | Review type: `requirement`, `technical`, or `code`                            |
 | `--change <name>` | Specify the change name (auto-detected if omitted)                           |
 | `--json`          | Output structured JSON                                                       |
+
+</details>
+
+<details>
+<summary><code>driv bundle [path]</code> — Prepare an offline bundle</summary>
+
+Downloads driv and its dependencies (OpenSpec, CodeGraph tarballs and Superpowers skills) into a
+directory so that `driv init` can run on an offline machine. Run this on a machine with network
+access.
+
+| Option                | Description                                                              |
+| --------------------- | ------------------------------------------------------------------------ |
+| `--no-network`        | Only bundle the driv tarball, skip network downloads                     |
+| `--skip-driv`         | Skip bundling the driv tarball                                           |
+| `--skip-openspec`     | Skip bundling the openspec tarball                                       |
+| `--skip-codegraph`    | Skip bundling the codegraph tarball                                      |
+| `--skip-superpowers`  | Skip bundling the superpowers skills                                     |
+| `--json`              | Output structured JSON                                                   |
 
 </details>
 

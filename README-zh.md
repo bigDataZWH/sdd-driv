@@ -74,6 +74,51 @@ driv init
 5. 创建 `.driv/config.yaml` 默认配置
 6. 创建 `.driv/templates/` 默认模板
 
+## 离线安装
+
+Driv 支持完全离线安装。在**有网络**的环境中预打包 driv 自身及其依赖（OpenSpec、CodeGraph
+的 npm tarball 与 Superpowers 技能），然后将离线包传输到**离线**机器，再执行 `driv init`。
+
+**第 1 步 —— 预打包离线包（联网机器）：**
+
+```bash
+driv bundle ./my-bundle
+```
+
+产物结构：
+
+```
+my-bundle/
+├── bundle.json                  # 离线包清单
+├── driv-<version>.tgz           # driv npm tarball
+├── openspec-<version>.tgz       # OpenSpec npm tarball
+├── codegraph-<version>.tgz      # CodeGraph npm tarball
+└── superpowers/skills/<name>/   # Superpowers 技能
+```
+
+**第 2 步 —— 从离线包安装 driv（离线机器）：**
+
+```bash
+npm install -g ./my-bundle/driv-*.tgz
+```
+
+**第 3 步 —— 使用离线包初始化项目（离线机器）：**
+
+```bash
+cd your-project
+driv init --offline --bundle ./my-bundle
+```
+
+离线模式下的行为：
+
+- Driv 技能、规则、hooks、模板均从已安装的包内复制（无需联网）
+- OpenSpec 直接写入最小化 `openspec/config.yaml`（不调用 `npx`）
+- Superpowers 技能从离线包的 `superpowers/skills/` 目录复制
+- CodeGraph 通过 `npm install <本地 tarball>` 从离线包安装（不访问 registry）
+
+如果只有 driv tarball（无依赖离线包），仍可通过 `driv init --offline` 初始化：driv 技能与模板
+离线安装，OpenSpec 写入最小配置，Superpowers/CodeGraph 自动跳过（需要离线包）。
+
 ## CLI 命令
 
 | 命令              | 描述                     |
@@ -83,6 +128,7 @@ driv init
 | `driv doctor`     | 诊断安装健康状态            |
 | `driv update`     | 同步命令、技能、模板和脚本   |
 | `driv review`     | 评审创建、提交和状态检查     |
+| `driv bundle`     | 预打包离线包（driv 及依赖）   |
 | `driv uninstall`  | 移除 Driv 技能与命令        |
 | `driv --help`     | 显示帮助                   |
 | `driv --version`  | 显示版本                   |
@@ -99,6 +145,8 @@ driv init
 | `--overwrite`        | 覆盖已有文件                                               |
 | `--scope <scope>`    | 安装范围：`project` 或 `global`                            |
 | `--json`             | 输出结构化 JSON                                            |
+| `--offline`          | 离线模式：跳过所有联网操作，使用离线兜底                     |
+| `--bundle <path>`    | 离线包目录路径，从中安装依赖（配合 `--offline` 使用）        |
 
 </details>
 
@@ -163,6 +211,23 @@ driv init
 | `--type <type>`   | 评审类型：`requirement`、`technical` 或 `code`                        |
 | `--change <name>` | 指定变更名称（省略时自动检测）                                       |
 | `--json`          | 输出结构化 JSON                                                      |
+
+</details>
+
+<details>
+<summary><code>driv bundle [path]</code> — 预打包离线包</summary>
+
+将 driv 自身及其依赖（OpenSpec、CodeGraph 的 npm tarball 与 Superpowers 技能）下载到指定目录，
+以便在离线机器上通过 `driv init` 安装。请在有网络的环境中运行此命令。
+
+| 选项                  | 描述                                                       |
+| --------------------- | --------------------------------------------------------- |
+| `--no-network`        | 仅打包 driv 自身 tarball，跳过联网下载                      |
+| `--skip-driv`         | 跳过打包 driv tarball                                      |
+| `--skip-openspec`     | 跳过打包 openspec tarball                                  |
+| `--skip-codegraph`    | 跳过打包 codegraph tarball                                 |
+| `--skip-superpowers`  | 跳过打包 superpowers 技能                                  |
+| `--json`              | 输出结构化 JSON                                            |
 
 </details>
 
