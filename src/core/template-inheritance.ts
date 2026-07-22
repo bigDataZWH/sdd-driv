@@ -195,126 +195,102 @@ function stripFrontmatter(content: string): { frontmatter: string | null; body: 
   return { frontmatter: match[0], body: content.slice(match[0].length) };
 }
 
-// 处理非 extend 策略（基于 sections 解析）
+type StrategyHandler = (
+  parentSections: ParsedSection[],
+  childSections: ParsedSection[],
+  sectionNames: string[],
+) => void;
+
 function applyStrategy(parent: string, child: string, rule: InheritanceRule): string {
   const parentSections = parseSections(parent);
   const childSections = parseSections(child);
 
-  if (rule.strategy === 'override') {
-    const sectionsToOverride = rule.sections.override ?? [];
-    for (const sectionName of sectionsToOverride) {
-      const parentSec = findSectionByName(parentSections, sectionName);
-      const childSec = findSectionByName(childSections, sectionName);
-      if (parentSec && childSec) {
-        replaceSection(parentSections, sectionName, childSec);
-      }
-    }
-    return sectionsToText(parentSections);
-  }
+  const strategyKey = rule.strategy as keyof typeof rule.sections;
+  const sectionNames = rule.sections[strategyKey] ?? [];
 
-  if (rule.strategy === 'merge') {
-    const sectionsToMerge = rule.sections.merge ?? [];
-    for (const sectionName of sectionsToMerge) {
-      const parentSec = findSectionByName(parentSections, sectionName);
-      const childSec = findSectionByName(childSections, sectionName);
-      if (parentSec && childSec) {
-        // 合并 content：追加子 section 的正文到父 section
-        if (childSec.content) {
-          if (parentSec.content) {
-            parentSec.content += '\n' + childSec.content;
-          } else {
-            parentSec.content = childSec.content;
-          }
+  const handlers: Record<string, StrategyHandler> = {
+    override: (ps, cs, names) => {
+      for (const name of names) {
+        const parentSec = findSectionByName(ps, name);
+        const childSec = findSectionByName(cs, name);
+        if (parentSec && childSec) {
+          replaceSection(ps, name, childSec);
         }
-        // 合并 children：追加子 section 独有的 children（同名同 level 不重复）
-        if (childSec.children) {
-          if (!parentSec.children) {
-            parentSec.children = [];
+      }
+    },
+    merge: (ps, cs, names) => {
+      for (const name of names) {
+        const parentSec = findSectionByName(ps, name);
+        const childSec = findSectionByName(cs, name);
+        if (parentSec && childSec) {
+          if (childSec.content) {
+            parentSec.content = parentSec.content
+              ? parentSec.content + '\n' + childSec.content
+              : childSec.content;
           }
-          for (const childChild of childSec.children) {
-            if (
-              !parentSec.children.some(
+          if (childSec.children) {
+            if (!parentSec.children) parentSec.children = [];
+            for (const childChild of childSec.children) {
+              const exists = parentSec.children.some(
                 (c) => c.name === childChild.name && c.level === childChild.level,
-              )
-            ) {
-              parentSec.children.push(cloneSection(childChild));
+              );
+              if (!exists) {
+                parentSec.children.push(cloneSection(childChild));
+              }
             }
           }
         }
       }
-    }
-    return sectionsToText(parentSections);
-  }
-
-  if (rule.strategy === 'add') {
-    const sectionsToAdd = rule.sections.add ?? [];
-    // add 策略语义：将子模板中存在、父模板中不存在的 section 添加到根数组。
-    // 保持子 section 的原 level（cloneSection 已保留 level），不强制调整层级；
-    // 若父模板任意层级已存在同名 section（hasSection 全局递归判断），则跳过避免重复。
-    for (const sectionName of sectionsToAdd) {
-      if (!hasSection(parentSections, sectionName)) {
-        const childSec = findSectionByName(childSections, sectionName);
-        if (childSec) {
-          parentSections.push(cloneSection(childSec));
+    },
+    add: (ps, cs, names) => {
+      for (const name of names) {
+        if (!hasSection(ps, name)) {
+          const childSec = findSectionByName(cs, name);
+          if (childSec) ps.push(cloneSection(childSec));
         }
       }
-    }
-    return sectionsToText(parentSections);
-  }
-
-  if (rule.strategy === 'replace') {
-    // 完全替换父模板中指定的 section
-    const sectionsToReplace = rule.sections.replace ?? [];
-    for (const sectionName of sectionsToReplace) {
-      const childSec = findSectionByName(childSections, sectionName);
-      if (childSec) {
-        replaceSection(parentSections, sectionName, childSec);
+    },
+    replace: (ps, cs, names) => {
+      for (const name of names) {
+        const childSec = findSectionByName(cs, name);
+        if (childSec) replaceSection(ps, name, childSec);
       }
-    }
-    return sectionsToText(parentSections);
-  }
-
-  if (rule.strategy === 'prepend') {
-    // 将子模板 section 内容前置到父模板对应 section 的 content 前
-    const sectionsToPrepend = rule.sections.prepend ?? [];
-    for (const sectionName of sectionsToPrepend) {
-      const parentSec = findSectionByName(parentSections, sectionName);
-      const childSec = findSectionByName(childSections, sectionName);
-      if (parentSec && childSec) {
-        parentSec.content = childSec.content + '\n' + parentSec.content;
+    },
+    prepend: (ps, cs, names) => {
+      for (const name of names) {
+        const parentSec = findSectionByName(ps, name);
+        const childSec = findSectionByName(cs, name);
+        if (parentSec && childSec) {
+          parentSec.content = childSec.content + '\n' + parentSec.content;
+        }
       }
-    }
-    return sectionsToText(parentSections);
-  }
-
-  if (rule.strategy === 'append') {
-    // 将子模板 section 内容追加到父模板对应 section 的 content 后
-    const sectionsToAppend = rule.sections.append ?? [];
-    for (const sectionName of sectionsToAppend) {
-      const parentSec = findSectionByName(parentSections, sectionName);
-      const childSec = findSectionByName(childSections, sectionName);
-      if (parentSec && childSec) {
-        parentSec.content = parentSec.content + '\n' + childSec.content;
+    },
+    append: (ps, cs, names) => {
+      for (const name of names) {
+        const parentSec = findSectionByName(ps, name);
+        const childSec = findSectionByName(cs, name);
+        if (parentSec && childSec) {
+          parentSec.content = parentSec.content + '\n' + childSec.content;
+        }
       }
-    }
-    return sectionsToText(parentSections);
-  }
-
-  if (rule.strategy === 'wrap') {
-    // wrap 策略：子模板 content 中的 {{CORE_TEMPLATE}} 占位符被替换为父模板对应 section 的 content
-    const sectionsToWrap = rule.sections.wrap ?? [];
-    for (const sectionName of sectionsToWrap) {
-      const parentSec = findSectionByName(parentSections, sectionName);
-      const childSec = findSectionByName(childSections, sectionName);
-      if (parentSec && childSec) {
-        // 使用 split().join() 全局替换，不要用 String.replace（只替换第一个）
-        childSec.content = childSec.content
-          .split('{{CORE_TEMPLATE}}')
-          .join(parentSec.content);
-        replaceSection(parentSections, sectionName, childSec);
+    },
+    wrap: (ps, cs, names) => {
+      for (const name of names) {
+        const parentSec = findSectionByName(ps, name);
+        const childSec = findSectionByName(cs, name);
+        if (parentSec && childSec) {
+          childSec.content = childSec.content
+            .split('{{CORE_TEMPLATE}}')
+            .join(parentSec.content);
+          replaceSection(ps, name, childSec);
+        }
       }
-    }
-    return sectionsToText(parentSections);
+    },
+  };
+
+  const handler = handlers[rule.strategy];
+  if (handler) {
+    handler(parentSections, childSections, sectionNames as string[]);
   }
 
   return sectionsToText(parentSections);

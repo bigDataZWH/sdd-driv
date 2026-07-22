@@ -59,6 +59,16 @@ function makeIssue(
 const UPPER_SNAKE_RE = /^[A-Z][A-Z0-9_]*$/;
 const CAMEL_CASE_RE = /^[a-z][a-zA-Z0-9]*$/;
 
+function getLineNumber(content: string, index: number): number {
+  return content.slice(0, index).split('\n').length;
+}
+
+function countParams(paramStr: string): number {
+  const trimmed = paramStr.trim();
+  if (!trimmed) return 0;
+  return trimmed.split(',').map((p) => p.trim()).filter(Boolean).length;
+}
+
 /** P3: 阈值集中定义，便于维护与调优 */
 const LIMITS = {
   /** 函数最大行数 */
@@ -84,7 +94,7 @@ function checkClassPascalCase(content: string, filePath?: string): CodeIssue[] {
   while ((match = re.exec(content)) !== null) {
     const name = match[1];
     if (name[0] !== name[0].toUpperCase()) {
-      const lineNum = content.slice(0, match.index).split('\n').length;
+      const lineNum = getLineNumber(content, match.index);
       issues.push(
         makeIssue(
           'class-pascal-case',
@@ -101,7 +111,6 @@ function checkClassPascalCase(content: string, filePath?: string): CodeIssue[] {
 
 function checkVarCamelCase(content: string, filePath?: string): CodeIssue[] {
   const issues: CodeIssue[] = [];
-  const re = /(?:let|var|const)\s+(\w+)\s*[=;]/g;
   const upperSnakeConsts = new Set<string>();
   const constRe = /const\s+(\w+)\s*[=;]/g;
   let m: RegExpExecArray | null;
@@ -114,7 +123,7 @@ function checkVarCamelCase(content: string, filePath?: string): CodeIssue[] {
   while ((m = re2.exec(content)) !== null) {
     const name = m[1];
     if (!CAMEL_CASE_RE.test(name)) {
-      const lineNum = content.slice(0, m.index).split('\n').length;
+      const lineNum = getLineNumber(content, m.index);
       issues.push(
         makeIssue('var-camel-case', 'major', `变量 "${name}" 应使用 camelCase`, filePath, lineNum),
       );
@@ -124,7 +133,7 @@ function checkVarCamelCase(content: string, filePath?: string): CodeIssue[] {
   while ((m = constRe2.exec(content)) !== null) {
     const name = m[1];
     if (!UPPER_SNAKE_RE.test(name) && !CAMEL_CASE_RE.test(name)) {
-      const lineNum = content.slice(0, m.index).split('\n').length;
+      const lineNum = getLineNumber(content, m.index);
       issues.push(
         makeIssue(
           'var-camel-case',
@@ -143,16 +152,18 @@ function checkConstUpperSnakeCase(content: string, filePath?: string): CodeIssue
   const issues: CodeIssue[] = [];
   const re = /const\s+(\w+)\s*=\s*(.+)$/gm;
   let m: RegExpExecArray | null;
+
+  const isLiteral = (value: string): boolean => {
+    return /^['"`]/.test(value) || /^\d/.test(value) || /^(true|false|null)\b/.test(value);
+  };
+
   while ((m = re.exec(content)) !== null) {
     const name = m[1];
     const value = m[2].trim();
-    // 跳过 camelCase const（由 var-camel-case 检查）
     if (CAMEL_CASE_RE.test(name)) continue;
-    // 仅对字面量常量（数字/字符串/布尔/null）要求 UPPER_SNAKE
-    const isLiteral = /^['"`]/.test(value) || /^\d/.test(value) || /^(true|false|null)\b/.test(value);
-    if (!isLiteral) continue;
+    if (!isLiteral(value)) continue;
     if (!UPPER_SNAKE_RE.test(name)) {
-      const lineNum = content.slice(0, m.index).split('\n').length;
+      const lineNum = getLineNumber(content, m.index);
       issues.push(
         makeIssue(
           'const-upper-snake-case',
@@ -175,54 +186,62 @@ interface FuncBlock {
 
 /** 把字符串和注释内容替换为等长空格，便于准确计数括号/关键词 */
 function stripStringsAndComments(content: string): string {
-  let result = '';
+  const result: string[] = new Array(content.length);
   let i = 0;
   let inString: false | '"' | "'" | '`' = false;
-  while (i < content.length) {
+  const len = content.length;
+
+  while (i < len) {
     const ch = content[i];
     const next = content[i + 1];
-    // 行注释
+
     if (!inString && ch === '/' && next === '/') {
       const end = content.indexOf('\n', i);
-      const lineEnd = end === -1 ? content.length : end;
-      result += ' '.repeat(lineEnd - i);
+      const lineEnd = end === -1 ? len : end;
+      for (let j = i; j < lineEnd; j++) {
+        result[j] = ' ';
+      }
       i = lineEnd;
       continue;
     }
-    // 块注释
+
     if (!inString && ch === '/' && next === '*') {
       const end = content.indexOf('*/', i + 2);
-      const blockEnd = end === -1 ? content.length : end + 2;
+      const blockEnd = end === -1 ? len : end + 2;
       for (let j = i; j < blockEnd; j++) {
-        result += content[j] === '\n' ? '\n' : ' ';
+        result[j] = content[j] === '\n' ? '\n' : ' ';
       }
       i = blockEnd;
       continue;
     }
-    // 字符串
+
     if (!inString && (ch === '"' || ch === "'" || ch === '`')) {
       inString = ch;
-      result += ' ';
+      result[i] = ' ';
       i++;
       continue;
     }
+
     if (inString) {
       if (ch === '\\') {
-        result += '  ';
+        result[i] = ' ';
+        result[i + 1] = ' ';
         i += 2;
         continue;
       }
       if (ch === inString) {
         inString = false;
       }
-      result += ch === '\n' ? '\n' : ' ';
+      result[i] = ch === '\n' ? '\n' : ' ';
       i++;
       continue;
     }
-    result += ch;
+
+    result[i] = ch;
     i++;
   }
-  return result;
+
+  return result.join('');
 }
 
 function findFunctionBodies(content: string): FuncBlock[] {
@@ -329,51 +348,31 @@ function checkFunctionLength(content: string, filePath?: string): CodeIssue[] {
 
 function checkParamCount(content: string, filePath?: string): CodeIssue[] {
   const issues: CodeIssue[] = [];
-  const re = /function\s+\w+\s*\(([^)]*)\)/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(content)) !== null) {
-    const params = m[1].trim();
-    const count = params
-      ? params
-          .split(',')
-          .map((p) => p.trim())
-          .filter(Boolean).length
-      : 0;
-    if (count > LIMITS.PARAM_COUNT) {
-      const lineNum = content.slice(0, m.index).split('\n').length;
-      issues.push(
-        makeIssue(
-          'param-count',
-          'major',
-          `函数有 ${count} 个参数（超过 ${LIMITS.PARAM_COUNT} 个限制）`,
-          filePath,
-          lineNum,
-        ),
-      );
+
+  const patterns: { re: RegExp; label: string }[] = [
+    { re: /function\s+\w+\s*\(([^)]*)\)/g, label: '函数' },
+    { re: /(?:const|let|var)\s+\w+\s*=\s*\(([^)]*)\)\s*=>/g, label: '箭头函数' },
+  ];
+
+  for (const { re, label } of patterns) {
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(content)) !== null) {
+      const count = countParams(m[1]);
+      if (count > LIMITS.PARAM_COUNT) {
+        const lineNum = getLineNumber(content, m.index);
+        issues.push(
+          makeIssue(
+            'param-count',
+            'major',
+            `${label}有 ${count} 个参数（超过 ${LIMITS.PARAM_COUNT} 个限制）`,
+            filePath,
+            lineNum,
+          ),
+        );
+      }
     }
   }
-  const arrowRe = /(?:const|let|var)\s+\w+\s*=\s*\(([^)]*)\)\s*=>/g;
-  while ((m = arrowRe.exec(content)) !== null) {
-    const params = m[1].trim();
-    const count = params
-      ? params
-          .split(',')
-          .map((p) => p.trim())
-          .filter(Boolean).length
-      : 0;
-    if (count > LIMITS.PARAM_COUNT) {
-      const lineNum = content.slice(0, m.index).split('\n').length;
-      issues.push(
-        makeIssue(
-          'param-count',
-          'major',
-          `箭头函数有 ${count} 个参数（超过 ${LIMITS.PARAM_COUNT} 个限制）`,
-          filePath,
-          lineNum,
-        ),
-      );
-    }
-  }
+
   return issues;
 }
 

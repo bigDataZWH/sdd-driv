@@ -50,11 +50,11 @@ describe('运行时脚本资产', () => {
     }
   });
 
-  it('所有脚本可通过 bash -n 语法检查 (quoted paths)', () => {
+  it('所有脚本路径在跨平台场景下正确处理', () => {
     for (const script of expectedScripts) {
-      const fullPath = scriptDir + '\\' + script;
-      const result = fs.existsSync(fullPath.replace(/\\/g, '\\\\'));
-      expect(result).toBe(true);
+      const fullPath = path.join(scriptDir, script);
+      expect(fs.existsSync(fullPath)).toBe(true);
+      expect(path.isAbsolute(fullPath)).toBe(true);
     }
   });
 

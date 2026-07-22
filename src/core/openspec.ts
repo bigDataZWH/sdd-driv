@@ -17,7 +17,7 @@ export function getNpmExecutable(platform: NodeJS.Platform = process.platform): 
 export async function execFileSafe(
   command: string,
   args: string[],
-  options: { cwd: string; stdio?: 'inherit' | ['inherit', 'inherit', 'pipe']; timeout?: number } = {},
+  options: { cwd?: string; stdio?: 'inherit' | ['inherit', 'inherit', 'pipe']; timeout?: number } = {},
 ): Promise<string> {
   const useCmdWrapper =
     process.platform === 'win32' && (command.endsWith('.cmd') || command.endsWith('.bat'));

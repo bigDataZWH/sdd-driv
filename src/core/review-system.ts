@@ -208,6 +208,41 @@ export class ReviewSystemImpl implements ReviewSystem {
     return `---\n${newFm}\n---\n` + content;
   }
 
+  private async checkFileExists(
+    state: Awaited<ReturnType<StateMachine['getState']>>,
+    field: keyof typeof state.openspec,
+    label: string,
+  ): Promise<{ passed: boolean; detail: string }> {
+    const filePath = state.openspec[field] as string | undefined;
+    if (filePath) {
+      const exists = await this.fs.exists(filePath);
+      return {
+        passed: exists,
+        detail: exists ? `${label} 文件存在` : `${label} 文件不存在`,
+      };
+    }
+    return { passed: false, detail: `${label} 路径未设置` };
+  }
+
+  private async fallbackCheck(
+    state: Awaited<ReturnType<StateMachine['getState']>>,
+    artifactKey: string,
+    label: string,
+  ): Promise<{ passed: boolean; detail: string }> {
+    const value = state.phases.build.artifacts[artifactKey];
+    return {
+      passed: value === 'true' || value === 'passed',
+      detail: `工具调用失败，回退到状态字段检查: ${
+        value === 'true' || value === 'passed' ? `${label}已通过` : `${label}未通过`
+      }`,
+    };
+  }
+
+  private getErrorMsg(error: unknown): string {
+    const err = error as { stderr?: string; message?: string };
+    return err.stderr || err.message || '';
+  }
+
   private async runAutoCheck(
     changeName: string,
     checkName: string,
@@ -215,48 +250,23 @@ export class ReviewSystemImpl implements ReviewSystem {
     const state = await this.stateMachine.getState(changeName);
 
     switch (checkName) {
-      case 'proposal 存在': {
-        if (state.openspec.proposal) {
-          const exists = await this.fs.exists(state.openspec.proposal);
-          return {
-            passed: exists,
-            detail: exists ? 'proposal 文件存在' : 'proposal 文件不存在',
-          };
-        }
-        return { passed: false, detail: 'proposal 路径未设置' };
-      }
-      case 'tasks 存在': {
-        if (state.openspec.tasks) {
-          const exists = await this.fs.exists(state.openspec.tasks);
-          return {
-            passed: exists,
-            detail: exists ? 'tasks 文件存在' : 'tasks 文件不存在',
-          };
-        }
-        return { passed: false, detail: 'tasks 路径未设置' };
-      }
-      case 'design 存在': {
-        if (state.openspec.design) {
-          const exists = await this.fs.exists(state.openspec.design);
-          return {
-            passed: exists,
-            detail: exists ? 'design 文件存在' : 'design 文件不存在',
-          };
-        }
-        return { passed: false, detail: 'design 路径未设置' };
-      }
+      case 'proposal 存在':
+        return this.checkFileExists(state, 'proposal', 'proposal');
+      case 'tasks 存在':
+        return this.checkFileExists(state, 'tasks', 'tasks');
+      case 'design 存在':
+        return this.checkFileExists(state, 'design', 'design');
       case '设计结构完整': {
-        if (state.openspec.design) {
-          const exists = await this.fs.exists(state.openspec.design);
-          if (!exists) return { passed: false, detail: 'design 文件不存在' };
-          const designContent = await this.fs.readFile(state.openspec.design);
-          const hasSections = /##\s+\S+/.test(designContent);
-          return {
-            passed: hasSections,
-            detail: hasSections ? '设计文档包含完整章节' : '设计文档缺少章节结构',
-          };
-        }
-        return { passed: false, detail: 'design 路径未设置' };
+        const designPath = state.openspec.design;
+        if (!designPath) return { passed: false, detail: 'design 路径未设置' };
+        const exists = await this.fs.exists(designPath);
+        if (!exists) return { passed: false, detail: 'design 文件不存在' };
+        const content = await this.fs.readFile(designPath);
+        const hasSections = /##\s+\S+/.test(content);
+        return {
+          passed: hasSections,
+          detail: hasSections ? '设计文档包含完整章节' : '设计文档缺少章节结构',
+        };
       }
       case '代码已提交': {
         try {
@@ -270,14 +280,8 @@ export class ReviewSystemImpl implements ReviewSystem {
               ? '工作区干净，代码已提交'
               : `工作区有未提交变更: ${stdout.trim().split('\n').length} 个文件`,
           };
-        } catch (error) {
-          const committed = state.phases.build.artifacts.committed;
-          return {
-            passed: committed === 'true',
-            detail: `工具调用失败，回退到状态字段检查: ${
-              committed === 'true' ? '代码已提交' : '代码未提交'
-            }`,
-          };
+        } catch {
+          return this.fallbackCheck(state, 'committed', '代码');
         }
       }
       case '测试通过': {
@@ -285,15 +289,9 @@ export class ReviewSystemImpl implements ReviewSystem {
           await execFileAsync('npm', ['test'], { cwd: this.root });
           return { passed: true, detail: '测试已通过（实际运行 npm test）' };
         } catch (error) {
-          const tests = state.phases.build.artifacts.tests;
-          const errMsg = (error as { stderr?: string; message?: string })?.stderr || (error as { message?: string })?.message || '';
+          const errMsg = this.getErrorMsg(error);
           if (errMsg.includes('npm') && !errMsg.includes('FAIL')) {
-            return {
-              passed: tests === 'passed',
-              detail: `工具调用失败，回退到状态字段检查: ${
-                tests === 'passed' ? '测试已通过' : '测试未通过'
-              }`,
-            };
+            return this.fallbackCheck(state, 'tests', '测试');
           }
           return { passed: false, detail: `测试失败: ${errMsg.slice(0, 200)}` };
         }
@@ -302,32 +300,23 @@ export class ReviewSystemImpl implements ReviewSystem {
         try {
           const srcDir = path.join(this.root, 'src');
           const files = await walkDir(srcDir);
-          let allPassed = true;
+          const tsFiles = files.filter((f) => f.endsWith('.ts'));
           const failedFiles: string[] = [];
-          for (const file of files) {
-            if (file.endsWith('.ts')) {
-              const content = await this.fs.readFile(file);
-              const result = await this.cleanCodeChecker!.check(content, file);
-              if (!result.passed) {
-                allPassed = false;
-                failedFiles.push(path.basename(file));
-              }
+          for (const file of tsFiles) {
+            const content = await this.fs.readFile(file);
+            const result = await this.cleanCodeChecker!.check(content, file);
+            if (!result.passed) {
+              failedFiles.push(path.basename(file));
             }
           }
           return {
-            passed: allPassed,
-            detail: allPassed
+            passed: failedFiles.length === 0,
+            detail: failedFiles.length === 0
               ? 'Clean Code 已通过（实际检查 src/）'
               : `Clean Code 失败: ${failedFiles.join(', ')}`,
           };
-        } catch (error) {
-          const cleanCode = state.phases.build.artifacts['clean-code'];
-          return {
-            passed: cleanCode === 'passed',
-            detail: `工具调用失败，回退到状态字段检查: ${
-              cleanCode === 'passed' ? 'Clean Code 已通过' : 'Clean Code 未通过'
-            }`,
-          };
+        } catch {
+          return this.fallbackCheck(state, 'clean-code', 'Clean Code');
         }
       }
       case '安全扫描通过': {
@@ -337,15 +326,9 @@ export class ReviewSystemImpl implements ReviewSystem {
           });
           return { passed: true, detail: '安全扫描已通过（实际运行 npm audit）' };
         } catch (error) {
-          const security = state.phases.build.artifacts['security-scan'];
-          const errMsg = (error as { stderr?: string; message?: string })?.stderr || (error as { message?: string })?.message || '';
+          const errMsg = this.getErrorMsg(error);
           if (errMsg.includes('npm') && !errMsg.includes('vulnerability')) {
-            return {
-              passed: security === 'passed',
-              detail: `工具调用失败，回退到状态字段检查: ${
-                security === 'passed' ? '安全扫描已通过' : '安全扫描未通过'
-              }`,
-            };
+            return this.fallbackCheck(state, 'security-scan', '安全扫描');
           }
           return { passed: false, detail: `安全扫描发现高危漏洞: ${errMsg.slice(0, 200)}` };
         }

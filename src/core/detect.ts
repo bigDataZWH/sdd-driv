@@ -107,14 +107,12 @@ export async function detectPlatforms(projectPath: string): Promise<Set<string>>
   return detected;
 }
 
-export async function hasSkills(
+async function getSkillDirEntries(
   baseDir: string,
   platform: Platform,
-  component: 'openspec' | 'superpowers' | 'driv',
-  _selectedPlatforms: Platform[] = [],
-  scope: InstallScope = 'project',
-): Promise<boolean> {
-  const skillDirEntries = await Promise.all(
+  scope: InstallScope,
+): Promise<{ skillsDir: string; entries: string[] }[]> {
+  return Promise.all(
     getPlatformSkillsDirs(platform, scope).map(async (skillsDir) => {
       const fullPath = path.join(baseDir, skillsDir, 'skills');
       return {
@@ -123,65 +121,67 @@ export async function hasSkills(
       };
     }),
   );
-  const entries = skillDirEntries.flatMap((dir) => dir.entries);
+}
 
+function checkComponentInEntries(
+  entries: string[],
+  skillDirEntries: { skillsDir: string; entries: string[] }[],
+  component: 'openspec' | 'superpowers' | 'driv',
+  platform: Platform,
+  baseDir: string,
+): Promise<boolean> {
   switch (component) {
     case 'openspec':
-      if (entries.some((e) => e.startsWith('openspec-'))) return true;
-      break;
+      return Promise.resolve(entries.some((e) => e.startsWith('openspec-')));
     case 'superpowers':
-      if (SUPERPOWERS_SKILLS.some((name) => entries.includes(name))) return true;
-      break;
+      return Promise.resolve(SUPERPOWERS_SKILLS.some((name) => entries.includes(name)));
     case 'driv':
       if (platform.id === 'opencode' || platform.id === 'trae') {
-        for (const dir of skillDirEntries) {
-          if (await hasDrivCommands(baseDir, dir.skillsDir, dir.entries)) return true;
-        }
-        break;
+        return (async () => {
+          for (const dir of skillDirEntries) {
+            if (await hasDrivCommands(baseDir, dir.skillsDir, dir.entries)) return true;
+          }
+          return false;
+        })();
       }
-      if (entries.some((e) => e.startsWith('driv'))) return true;
-      break;
+      return Promise.resolve(entries.some((e) => e.startsWith('driv')));
+  }
+}
+
+export async function hasSkills(
+  baseDir: string,
+  platform: Platform,
+  component: 'openspec' | 'superpowers' | 'driv',
+  _selectedPlatforms: Platform[] = [],
+  scope: InstallScope = 'project',
+): Promise<boolean> {
+  const skillDirEntries = await getSkillDirEntries(baseDir, platform, scope);
+  const entries = skillDirEntries.flatMap((dir) => dir.entries);
+
+  if (await checkComponentInEntries(entries, skillDirEntries, component, platform, baseDir)) {
+    return true;
   }
 
   if (scope === 'project' && baseDir !== os.homedir()) {
-    const globalSkillDirEntries = await Promise.all(
-      getPlatformSkillsDirs(platform, 'global').map(async (skillsDir) => {
-        const fullPath = path.join(os.homedir(), skillsDir, 'skills');
-        return {
-          skillsDir,
-          entries: (await fileExists(fullPath)) ? await readDir(fullPath) : [],
-        };
-      }),
-    );
+    const globalSkillDirEntries = await getSkillDirEntries(os.homedir(), platform, 'global');
     const globalEntries = globalSkillDirEntries.flatMap((dir) => dir.entries);
 
-    switch (component) {
-      case 'openspec':
-        if (globalEntries.some((e) => e.startsWith('openspec-'))) return true;
-        break;
-      case 'superpowers':
-        if (SUPERPOWERS_SKILLS.some((name) => globalEntries.includes(name))) return true;
-        break;
-      case 'driv':
-        if (platform.id === 'opencode' || platform.id === 'trae') {
-          for (const dir of globalSkillDirEntries) {
-            if (await hasDrivCommands(os.homedir(), dir.skillsDir, dir.entries)) {
-              return true;
-            }
-          }
-          break;
-        }
-        if (globalEntries.some((e) => e.startsWith('driv'))) return true;
-        break;
+    if (
+      await checkComponentInEntries(
+        globalEntries,
+        globalSkillDirEntries,
+        component,
+        platform,
+        os.homedir(),
+      )
+    ) {
+      return true;
     }
   }
 
-  if (component === 'superpowers' && platform.id === 'claude') {
-    if (await hasPluginSuperpowers()) return true;
-  }
-
-  if (component === 'superpowers' && platform.id === 'opencode') {
-    if (await hasOpenCodePluginSuperpowers()) return true;
+  if (component === 'superpowers') {
+    if (platform.id === 'claude' && (await hasPluginSuperpowers())) return true;
+    if (platform.id === 'opencode' && (await hasOpenCodePluginSuperpowers())) return true;
   }
 
   return false;

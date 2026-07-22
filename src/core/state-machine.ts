@@ -193,32 +193,35 @@ export class StateMachine {
     return classifyScale(tasks.length, changedFiles.length, 0);
   }
 
-  async setPrdPath(changeName: string, prdPath: string): Promise<void> {
+  async setArtifactPath(
+    changeName: string,
+    artifact: string,
+    value: string,
+    phase: Phase = 'design',
+    openspecField?: string,
+  ): Promise<void> {
     await this.updateState(changeName, (state) => {
-      state.openspec.prd = prdPath;
-      state.phases.clarify.artifacts.prd = prdPath;
+      state.phases[phase].artifacts[artifact] = value;
+      if (openspecField) {
+        (state.openspec as Record<string, unknown>)[openspecField] = value;
+      }
     });
+  }
+
+  async setPrdPath(changeName: string, prdPath: string): Promise<void> {
+    await this.setArtifactPath(changeName, 'prd', prdPath, 'clarify', 'prd');
   }
 
   async setProposalPath(changeName: string, proposalPath: string): Promise<void> {
-    await this.updateState(changeName, (state) => {
-      state.openspec.proposal = proposalPath;
-      state.phases.design.artifacts.proposal = proposalPath;
-    });
+    await this.setArtifactPath(changeName, 'proposal', proposalPath, 'design', 'proposal');
   }
 
   async setDesignPath(changeName: string, designPath: string): Promise<void> {
-    await this.updateState(changeName, (state) => {
-      state.openspec.design = designPath;
-      state.phases.design.artifacts.design = designPath;
-    });
+    await this.setArtifactPath(changeName, 'design', designPath, 'design', 'design');
   }
 
   async setTasksPath(changeName: string, tasksPath: string): Promise<void> {
-    await this.updateState(changeName, (state) => {
-      state.openspec.tasks = tasksPath;
-      state.phases.design.artifacts.tasks = tasksPath;
-    });
+    await this.setArtifactPath(changeName, 'tasks', tasksPath, 'design', 'tasks');
   }
 
   async setSpecsPaths(changeName: string, specsPaths: string[]): Promise<void> {
@@ -229,15 +232,11 @@ export class StateMachine {
   }
 
   async setDesignConverted(changeName: string, value: string): Promise<void> {
-    await this.updateState(changeName, (state) => {
-      state.phases.design.artifacts['design-converted'] = value;
-    });
+    await this.setArtifactPath(changeName, 'design-converted', value, 'design');
   }
 
   async setDetailedDesignCompleted(changeName: string): Promise<void> {
-    await this.updateState(changeName, (state) => {
-      state.phases.design.artifacts['detailed-design-completed'] = 'true';
-    });
+    await this.setArtifactPath(changeName, 'detailed-design-completed', 'true', 'design');
   }
 
   async setBrainstormingPath(changeName: string, brainstormingPath: string): Promise<void> {

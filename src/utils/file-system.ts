@@ -13,29 +13,27 @@ export class FileSystem {
     this.root = path.resolve(root);
   }
 
-  async ensureDir(dir: string): Promise<void> {
-    const resolved = path.resolve(dir);
-    // P2-14: 沙箱检查，防止路径穿越到项目根之外
+  private resolveAndCheck(targetPath: string): string {
+    const resolved = path.resolve(targetPath);
     if (!isWithinRoot(resolved, this.root)) {
       throw new Error(`Path ${resolved} is outside project root ${this.root}`);
     }
+    return resolved;
+  }
+
+  async ensureDir(dir: string): Promise<void> {
+    const resolved = this.resolveAndCheck(dir);
     await fs.promises.mkdir(resolved, { recursive: true });
   }
 
   async writeFile(filePath: string, content: string): Promise<void> {
-    const resolved = path.resolve(filePath);
-    if (!isWithinRoot(resolved, this.root)) {
-      throw new Error(`Path ${resolved} is outside project root ${this.root}`);
-    }
+    const resolved = this.resolveAndCheck(filePath);
     await this.ensureDir(path.dirname(resolved));
     await fs.promises.writeFile(resolved, content, 'utf-8');
   }
 
   async readFile(filePath: string): Promise<string> {
-    const resolved = path.resolve(filePath);
-    if (!isWithinRoot(resolved, this.root)) {
-      throw new Error(`Path ${resolved} is outside project root ${this.root}`);
-    }
+    const resolved = this.resolveAndCheck(filePath);
     return fs.promises.readFile(resolved, 'utf-8');
   }
 
@@ -49,25 +47,14 @@ export class FileSystem {
   }
 
   async copyFile(src: string, dest: string): Promise<void> {
-    // P2-14: 对 src 和 dest 都做沙箱检查
-    const resolvedSrc = path.resolve(src);
-    const resolvedDest = path.resolve(dest);
-    if (!isWithinRoot(resolvedSrc, this.root)) {
-      throw new Error(`Source ${resolvedSrc} is outside project root ${this.root}`);
-    }
-    if (!isWithinRoot(resolvedDest, this.root)) {
-      throw new Error(`Destination ${resolvedDest} is outside project root ${this.root}`);
-    }
+    const resolvedSrc = this.resolveAndCheck(src);
+    const resolvedDest = this.resolveAndCheck(dest);
     await this.ensureDir(path.dirname(resolvedDest));
     await fs.promises.copyFile(resolvedSrc, resolvedDest);
   }
 
   async listDir(dir: string): Promise<string[]> {
-    const resolved = path.resolve(dir);
-    // P2-14: 沙箱检查，防止列出项目根外的目录
-    if (!isWithinRoot(resolved, this.root)) {
-      throw new Error(`Path ${resolved} is outside project root ${this.root}`);
-    }
+    const resolved = this.resolveAndCheck(dir);
     const entries = await fs.promises.readdir(resolved, { withFileTypes: true });
     return entries.map((e) => e.name);
   }
@@ -78,10 +65,7 @@ export class FileSystem {
   }
 
   async stat(filePath: string): Promise<fs.Stats> {
-    const resolved = path.resolve(filePath);
-    if (!isWithinRoot(resolved, this.root)) {
-      throw new Error(`Path ${resolved} is outside project root ${this.root}`);
-    }
+    const resolved = this.resolveAndCheck(filePath);
     return fs.promises.stat(resolved);
   }
 
@@ -89,18 +73,12 @@ export class FileSystem {
     target: string,
     options?: { recursive?: boolean; force?: boolean },
   ): Promise<void> {
-    const resolved = path.resolve(target);
-    if (!isWithinRoot(resolved, this.root)) {
-      throw new Error(`Path ${resolved} is outside project root ${this.root}`);
-    }
+    const resolved = this.resolveAndCheck(target);
     await fs.promises.rm(resolved, options);
   }
 
   async unlink(filePath: string): Promise<void> {
-    const resolved = path.resolve(filePath);
-    if (!isWithinRoot(resolved, this.root)) {
-      throw new Error(`Path ${resolved} is outside project root ${this.root}`);
-    }
+    const resolved = this.resolveAndCheck(filePath);
     await fs.promises.unlink(resolved);
   }
 
@@ -108,10 +86,7 @@ export class FileSystem {
     dir: string,
     options?: { recursive?: boolean },
   ): Promise<void> {
-    const resolved = path.resolve(dir);
-    if (!isWithinRoot(resolved, this.root)) {
-      throw new Error(`Path ${resolved} is outside project root ${this.root}`);
-    }
+    const resolved = this.resolveAndCheck(dir);
     await fs.promises.mkdir(resolved, options);
   }
 }
